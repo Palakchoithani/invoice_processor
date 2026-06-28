@@ -1253,7 +1253,7 @@
         return;
       }
       container.innerHTML = items.map(r => {
-        const cls = r.status === 'SUCCESS' ? 'badge-success' : r.status === 'DUPLICATE' ? 'badge-dup' : 'badge-fail';
+        const cls = r.status === 'SUCCESS' ? 'badge-success' : r.status === 'DUPLICATE' ? 'badge-dup' : r.status === 'QUEUED' ? 'badge-dup' : 'badge-fail';
         const inv = r.invoice ? `${fmtCurrency(r.invoice.total_amount)} · ${escapeHTML(r.invoice.vendor_name || '')}` : '';
         return `
           <div style="background:var(--bg-soft); padding:12px; border-radius:6px; border:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
@@ -1415,7 +1415,7 @@
           return;
         }
         tbody.innerHTML = rows.map(r => {
-          const cls = r.status === 'SUCCESS' ? 'badge-success' : r.status === 'DUPLICATE' ? 'badge-dup' : 'badge-fail';
+          const cls = r.status === 'SUCCESS' ? 'badge-success' : r.status === 'DUPLICATE' ? 'badge-dup' : r.status === 'QUEUED' ? 'badge-dup' : 'badge-fail';
           return `
             <tr>
               <td>${escapeHTML(r.file_name)}</td>

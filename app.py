@@ -53,7 +53,7 @@ def dashboard():
 # ── Invoice Upload ───────────────────────────────────────────────────────────
 
 @app.post("/upload")
-async def upload_invoice(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+def upload_invoice(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """Upload and immediately process a single invoice."""
     try:
         ext = Path(file.filename).suffix.lower()
@@ -71,29 +71,33 @@ async def upload_invoice(background_tasks: BackgroundTasks, file: UploadFile = F
         return {"status": "FAILED", "detail": f"Server crash: {str(e)}"}
 
 
-@app.post("/bulk-upload")
-async def bulk_upload(files: List[UploadFile] = File(...)):
-    """Upload multiple invoices and process them all."""
-    saved_paths = []
-    for upload in files:
-        ext = Path(upload.filename).suffix.lower()
-        if ext not in SUPPORTED_FORMATS:
-            continue
-        dest = os.path.join(INVOICES_DIR, upload.filename)
-        with open(dest, "wb") as f_out:
-            shutil.copyfileobj(upload.file, f_out)
-        saved_paths.append(dest)
-
+def _run_bulk_background(saved_paths: List[str]):
     from concurrent.futures import ThreadPoolExecutor
-
-    results = []
-    # Process concurrently using up to 10 threads
     with ThreadPoolExecutor(max_workers=10) as executor:
-        # map guarantees the results are in the same order as saved_paths
-        for result in executor.map(process_single_invoice, saved_paths):
-            results.append(result)
+        for _ in executor.map(process_single_invoice, saved_paths):
+            pass
 
-    return {"total": len(results), "results": results}
+@app.post("/bulk-upload")
+def bulk_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+    """Upload multiple invoices and process them in the background."""
+    try:
+        saved_paths = []
+        for upload in files:
+            ext = Path(upload.filename).suffix.lower()
+            if ext not in SUPPORTED_FORMATS:
+                continue
+            dest = os.path.join(INVOICES_DIR, upload.filename)
+            with open(dest, "wb") as f_out:
+                shutil.copyfileobj(upload.file, f_out)
+            saved_paths.append(dest)
+
+        background_tasks.add_task(_run_bulk_background, saved_paths)
+
+        results = [{"file": Path(p).name, "status": "QUEUED", "detail": "Processing in background"} for p in saved_paths]
+        return {"total": len(results), "results": results}
+    except Exception as e:
+        log_error(f"Global bulk-upload crash: {e}")
+        return {"status": "FAILED", "detail": f"Server crash: {str(e)}"}
 
 
 @app.post("/process-folder")
