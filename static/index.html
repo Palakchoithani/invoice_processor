@@ -1115,9 +1115,15 @@
       btn.style.pointerEvents = 'none';
 
       setTimeout(() => {
+        sessionStorage.setItem('bhelconnect-auth', 'true');
         document.getElementById('sec-auth').classList.add('hidden');
         notify('Welcome back', `Secure session started for ${user}`, 'success');
       }, 800);
+    }
+    
+    // Check session on load
+    if (sessionStorage.getItem('bhelconnect-auth') === 'true') {
+      document.getElementById('sec-auth').classList.add('hidden');
     }
 
     function setUploadMode(mode, btn) {
