@@ -55,15 +55,15 @@ def dashboard():
 @app.post("/upload")
 async def upload_invoice(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """Upload and immediately process a single invoice."""
-    ext = Path(file.filename).suffix.lower()
-    if ext not in SUPPORTED_FORMATS:
-        raise HTTPException(400, f"Unsupported format '{ext}'. Allowed: {SUPPORTED_FORMATS}")
-
-    dest = os.path.join(INVOICES_DIR, file.filename)
-    with open(dest, "wb") as f_out:
-        shutil.copyfileobj(file.file, f_out)
-
     try:
+        ext = Path(file.filename).suffix.lower()
+        if ext not in SUPPORTED_FORMATS:
+            raise HTTPException(400, f"Unsupported format '{ext}'. Allowed: {SUPPORTED_FORMATS}")
+
+        dest = os.path.join(INVOICES_DIR, file.filename)
+        with open(dest, "wb") as f_out:
+            shutil.copyfileobj(file.file, f_out)
+
         result = process_single_invoice(dest)
         return result
     except Exception as e:
