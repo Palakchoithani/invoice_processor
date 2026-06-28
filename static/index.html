@@ -826,8 +826,8 @@
 
     <div class="navbar-right">
       <div class="user-profile">
-        <div class="user-avatar">HM</div>
-        <span class="user-name">Hanu Mishra</span>
+        <div class="user-avatar" id="displayAvatar">HM</div>
+        <span class="user-name" id="displayUsername">Hanu Mishra</span>
       </div>
     </div>
   </nav>
@@ -838,10 +838,7 @@
         <h1 id="pageTitle">Dashboard</h1>
         <p id="pageSubtitle">Monitor invoice intake, processing status, and operating volume.</p>
       </div>
-      <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="Toggle dark mode">
-        <span id="themeIcon">☾</span>
-        <span id="themeText">Dark Mode</span>
-      </button>
+    <!-- Theme Toggle Removed -->
     </div>
 
     <!-- ── SECTION: DASHBOARD ── -->
@@ -1116,6 +1113,11 @@
 
       setTimeout(() => {
         sessionStorage.setItem('bhelconnect-auth', 'true');
+        sessionStorage.setItem('bhelconnect-user', user);
+        
+        document.getElementById('displayUsername').textContent = user;
+        document.getElementById('displayAvatar').textContent = user.substring(0, 2).toUpperCase();
+        
         document.getElementById('sec-auth').classList.add('hidden');
         notify('Welcome back', `Secure session started for ${user}`, 'success');
       }, 800);
@@ -1123,6 +1125,9 @@
     
     // Check session on load
     if (sessionStorage.getItem('bhelconnect-auth') === 'true') {
+      const savedUser = sessionStorage.getItem('bhelconnect-user') || 'Admin User';
+      document.getElementById('displayUsername').textContent = savedUser;
+      document.getElementById('displayAvatar').textContent = savedUser.substring(0, 2).toUpperCase();
       document.getElementById('sec-auth').classList.add('hidden');
     }
 
@@ -1325,6 +1330,7 @@
         const height = Math.max(8, Math.round((m.count / max) * 100));
         return `
           <div class="bar-item" title="${m.count} invoice(s)">
+            <div style="font-size:0.75rem; color:var(--text); font-weight:700;">${m.count}</div>
             <div class="bar-track"><div class="bar-fill" style="height:${height}%"></div></div>
             <div class="bar-label">${m.label}</div>
           </div>`;
