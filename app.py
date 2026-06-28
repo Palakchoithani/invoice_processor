@@ -84,9 +84,14 @@ async def bulk_upload(files: List[UploadFile] = File(...)):
             shutil.copyfileobj(upload.file, f_out)
         saved_paths.append(dest)
 
+    from concurrent.futures import ThreadPoolExecutor
+
     results = []
-    for path in saved_paths:
-        results.append(process_single_invoice(path))
+    # Process concurrently using up to 10 threads
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # map guarantees the results are in the same order as saved_paths
+        for result in executor.map(process_single_invoice, saved_paths):
+            results.append(result)
 
     return {"total": len(results), "results": results}
 
@@ -94,7 +99,15 @@ async def bulk_upload(files: List[UploadFile] = File(...)):
 @app.post("/process-folder")
 def process_folder():
     """Process all invoices already present in the invoices/ folder."""
-    results = process_all_invoices()
+    from services.processor import get_all_pending
+    from concurrent.futures import ThreadPoolExecutor
+    
+    pending = get_all_pending()
+    results = []
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        for result in executor.map(process_single_invoice, pending):
+            results.append(result)
+            
     return {"total": len(results), "results": results}
 
 
