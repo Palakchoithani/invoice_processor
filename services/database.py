@@ -16,11 +16,18 @@ def get_db():
     try:
         # Check if the app is already initialized
         if not firebase_admin._apps:
-            if os.path.exists(FIREBASE_KEY_PATH):
+            import json
+            firebase_json = os.getenv("FIREBASE_JSON")
+            if firebase_json:
+                # Initialize from raw JSON string (Render environment variable)
+                cred_dict = json.loads(firebase_json)
+                cred = credentials.Certificate(cred_dict)
+                firebase_admin.initialize_app(cred)
+            elif os.path.exists(FIREBASE_KEY_PATH):
                 cred = credentials.Certificate(FIREBASE_KEY_PATH)
                 firebase_admin.initialize_app(cred)
             else:
-                # Fallback to application default credentials (useful for Render deployment with env vars)
+                # Fallback
                 firebase_admin.initialize_app()
         _db = firestore.client()
         log_info("Firebase initialized successfully.")
