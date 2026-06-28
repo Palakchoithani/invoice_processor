@@ -1171,20 +1171,29 @@
       results.innerHTML = '<div class="empty">Extracting details from invoice files...</div>';
 
       try {
+        let hasDuplicate = false;
         if (uploadMode === 'single') {
           const fd = new FormData();
           fd.append('file', selectedFiles[0]);
           const res = await fetch(API_BASE + '/upload', { method: 'POST', body: fd });
           const data = await res.json();
           renderResult([data], results);
+          if (data.status === 'DUPLICATE') hasDuplicate = true;
         } else {
           const fd = new FormData();
           selectedFiles.forEach(f => fd.append('files', f));
           const res = await fetch(API_BASE + '/bulk-upload', { method: 'POST', body: fd });
           const data = await res.json();
           renderResult(data.results || [], results);
+          if (data.results && data.results.some(r => r.status === 'DUPLICATE')) hasDuplicate = true;
         }
-        notify('Extraction Complete', 'The selected invoice files have been processed.', 'success');
+        
+        if (hasDuplicate) {
+          notify('Duplicate Warning', 'One or more of these invoices have already been scanned before.', 'warn');
+        } else {
+          notify('Extraction Complete', 'The selected invoice files have been processed.', 'success');
+        }
+        
         loadStats();
       } catch(e) {
         results.innerHTML = `<div style="padding:16px; color:var(--danger)">Extraction failed: ${escapeHTML(businessMessage(e.message))}</div>`;
