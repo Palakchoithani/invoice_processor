@@ -11,7 +11,7 @@ import google.generativeai as genai
 import fitz  # PyMuPDF
 from PIL import Image
 
-from services.logger import log_info, log_error
+from services.logger import log_info, log_error, log_warning
 
 # ==========================================================
 # CONFIG
