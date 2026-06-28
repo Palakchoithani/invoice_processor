@@ -101,18 +101,21 @@ def bulk_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = Fil
 
 
 @app.post("/process-folder")
-def process_folder():
-    """Process all invoices already present in the invoices/ folder."""
+def process_folder(background_tasks: BackgroundTasks):
+    """Process all invoices already present in the invoices/ folder in the background."""
     from services.processor import get_all_pending
-    from concurrent.futures import ThreadPoolExecutor
-    
-    pending = get_all_pending()
-    results = []
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        for result in executor.map(process_single_invoice, pending):
-            results.append(result)
-            
-    return {"total": len(results), "results": results}
+    try:
+        pending = get_all_pending()
+        if not pending:
+            return {"total": 0, "results": []}
+
+        background_tasks.add_task(_run_bulk_background, pending)
+
+        results = [{"file": Path(p).name, "status": "QUEUED", "detail": "Processing in background"} for p in pending]
+        return {"total": len(results), "results": results}
+    except Exception as e:
+        log_error(f"Global process-folder crash: {e}")
+        return {"status": "FAILED", "detail": f"Server crash: {str(e)}"}
 
 
 # ── Invoice Queries ───────────────────────────────────────────────────────────
