@@ -14,26 +14,38 @@ def extract_text_from_pdf(file_path: str) -> str:
     return text
 
 def parse_with_regex(text: str) -> dict:
-    # 1. Total Amount
-    total_match = re.search(r"(?i)(?:total|amount due|balance due)[\s:]*[\$Rs\.]*\s*([\d,]+\.\d{2})", text)
+    # 1. Total Amount (Exclude Subtotal, handle Rupee ₹ symbol and newlines)
+    total_match = re.search(r"(?i)(?<!sub\s)(?<!sub)(?:total|amount due|balance due|grand total)[\s\n:]*[\$Rs\₹\.]*\s*([\d,]+\.\d{2})", text)
     total_amount = float(total_match.group(1).replace(",", "")) if total_match else None
 
-    # 2. Tax Amount
-    tax_match = re.search(r"(?i)(?:tax|gst|vat|cgst|sgst)[\s:]*[\$Rs\.]*\s*([\d,]+\.\d{2})", text)
+    # 2. Tax Amount (GST, IGST, SGST, CGST, VAT, TAX)
+    tax_match = re.search(r"(?i)(?:tax|gst|igst|cgst|sgst|vat)[\s\n:]*[\$Rs\₹\.]*\s*([\d,]+\.\d{2})", text)
     tax_amount = float(tax_match.group(1).replace(",", "")) if tax_match else None
 
-    # 3. Invoice Date
-    date_match = re.search(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b", text)
+    # 3. Invoice Date (Handle standard formats)
+    date_match = re.search(r"(?i)(?:date)[\s\n:]*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", text)
+    if not date_match:
+        # Fallback to just finding any date
+        date_match = re.search(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b", text)
     invoice_date = date_match.group(1) if date_match else None
 
-    # 4. Invoice Number
-    inv_match = re.search(r"(?i)(?:invoice|inv)\s*(?:no|#|num)?[\s.:]*([A-Z0-9-]{3,})", text)
+    # 4. Invoice Number (Require word boundary, prevent matching the word 'Invoice' itself)
+    inv_match = re.search(r"(?i)\b(?:invoice|inv)\b\s*(?:no|#|num)?[\s\n.:]*((?!invoice\b)[A-Z0-9-/]{4,})", text)
     invoice_number = inv_match.group(1) if inv_match else None
 
-    # 5. Vendor Name
-    # Fallback to the first non-empty line
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    vendor_name = lines[0] if lines else None
+    # 5. Vendor Name (Look for company suffixes, or fallback)
+    vendor_name = None
+    company_match = re.search(r"(?i)((?:For\s+)?([A-Za-z0-9&\s.,]+(?:Private Limited|Pvt\.?\s*Ltd\.?|LLP|Inc\.?|LLC|Corporation|Corp\.?|Limited|Ltd\.?)))", text)
+    if company_match:
+        vendor_name = company_match.group(2).strip()
+        # Clean up any preceding garbage from multiple lines matching
+        vendor_name = vendor_name.split("\n")[-1].strip()
+        if vendor_name.lower().startswith("for "):
+            vendor_name = vendor_name[4:].strip()
+    else:
+        # Fallback to the first non-empty, non-trivial line
+        lines = [line.strip() for line in text.split("\n") if len(line.strip()) > 4]
+        vendor_name = lines[0] if lines else None
 
     if vendor_name and len(vendor_name) > 100:
         vendor_name = vendor_name[:100]
