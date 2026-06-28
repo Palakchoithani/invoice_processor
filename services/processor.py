@@ -10,7 +10,6 @@ from services.database import (
     save_invoice,
     write_log,
 )
-from services.firebase_service import save_invoice as save_to_firestore
 
 from services.file_handler import (
     move_to_processed,
@@ -155,13 +154,8 @@ def process_single_invoice(file_path: str) -> dict:
     # --------------------------------------------------
     try:
 
-        # Existing SQL / Local DB
-        row_id = save_invoice(invoice)
-
-        # Firestore
-        firestore_id = save_to_firestore(
-            invoice.to_dict()
-        )
+        # Save to Firebase Firestore
+        firestore_id = save_invoice(invoice)
 
         write_log(
             ProcessingLog(
@@ -174,7 +168,6 @@ def process_single_invoice(file_path: str) -> dict:
 
         log_info(
             f"Invoice saved. "
-            f"DB ID={row_id}, "
             f"Firestore ID={firestore_id}"
         )
 
@@ -182,7 +175,6 @@ def process_single_invoice(file_path: str) -> dict:
             "file": file_name,
             "status": "SUCCESS",
             "detail": "Invoice saved successfully",
-            "database_id": row_id,
             "firestore_id": firestore_id,
             "invoice": invoice.to_dict(),
         }
