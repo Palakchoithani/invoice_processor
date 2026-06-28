@@ -92,7 +92,7 @@ def parse_json_response(text: str) -> dict:
 # GEMINI STRUCTURING
 # ==========================================================
 
-def extract_from_image(image: Image.Image, retries: int = 3) -> Optional[dict]:
+def extract_from_image(image: Image.Image, retries: int = 5) -> Optional[dict]:
     if not GEMINI_API_KEY:
         raise EnvironmentError("GEMINI_API_KEY not found")
 
@@ -110,9 +110,16 @@ def extract_from_image(image: Image.Image, retries: int = 3) -> Optional[dict]:
             
             return parse_json_response(raw_response)
         except Exception as e:
-            log_error(f"Gemini attempt failed: {str(e)}")
+            error_msg = str(e)
+            log_error(f"Gemini attempt failed: {error_msg}")
             if attempt < retries - 1:
-                time.sleep(2)
+                # If it's a rate limit error (429), we need to wait much longer
+                if "429" in error_msg or "Quota exceeded" in error_msg:
+                    sleep_time = 30 + (attempt * 10) # 30s, 40s, 50s
+                    log_warning(f"Rate limit hit! Sleeping for {sleep_time} seconds before retrying...")
+                    time.sleep(sleep_time)
+                else:
+                    time.sleep(4)
             else:
                 raise
 
