@@ -828,6 +828,7 @@
       <div class="user-profile">
         <div class="user-avatar" id="displayAvatar">HM</div>
         <span class="user-name" id="displayUsername">Hanu Mishra</span>
+        <button class="btn btn-secondary" onclick="performLogout()" style="margin-left: 12px; font-size: 0.8rem; padding: 6px 12px; background: transparent; color: var(--danger); border-color: transparent;">Logout</button>
       </div>
     </div>
   </nav>
@@ -1121,6 +1122,19 @@
         document.getElementById('sec-auth').classList.add('hidden');
         notify('Welcome back', `Secure session started for ${user}`, 'success');
       }, 800);
+    }
+    
+    function performLogout() {
+      sessionStorage.removeItem('bhelconnect-auth');
+      sessionStorage.removeItem('bhelconnect-user');
+      document.getElementById('authUsername').value = '';
+      document.getElementById('authPassword').value = '';
+      const btn = document.querySelector('.auth-form .btn');
+      btn.innerHTML = 'Secure Sign In';
+      btn.style.opacity = '1';
+      btn.style.pointerEvents = 'auto';
+      document.getElementById('sec-auth').classList.remove('hidden');
+      notify('Logged out', 'Your session has been securely closed.', 'success');
     }
     
     // Check session on load
