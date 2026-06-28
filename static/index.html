@@ -1267,6 +1267,33 @@
             </div>
           </div>`;
       }).join('');
+
+      // Auto-poll if any items are still in QUEUED state
+      if (items.some(r => r.status === 'QUEUED')) {
+        setTimeout(async () => {
+          try {
+            const res = await fetch(API_BASE + '/logs');
+            const logs = await res.json();
+            const updatedItems = items.map(orig => {
+              if (orig.status !== 'QUEUED') return orig;
+              const match = logs.find(l => l.file_name === orig.file || l.file_name === orig.file_name);
+              if (match) {
+                return {
+                  file: orig.file,
+                  status: match.status,
+                  detail: match.error_message || 'Processed successfully',
+                  invoice: null
+                };
+              }
+              return orig;
+            });
+            renderResult(updatedItems, container);
+          } catch (e) {
+            // silent retry
+            setTimeout(() => renderResult(items, container), 5000);
+          }
+        }, 3000);
+      }
     }
 
     async function loadStats() {
