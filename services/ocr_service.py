@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import google.generativeai as genai
-from pdf2image import convert_from_path
+import fitz  # PyMuPDF
 from PIL import Image
 
 from services.logger import log_info, log_error
@@ -56,10 +56,13 @@ def load_image(file_path: str) -> Image.Image:
     return Image.open(file_path).convert("RGB")
 
 def pdf_to_image(file_path: str) -> Image.Image:
-    pages = convert_from_path(file_path, dpi=200)
-    if not pages:
+    doc = fitz.open(file_path)
+    if not doc:
         raise ValueError("PDF contains no pages")
-    return pages[0]
+    page = doc.load_page(0)
+    pix = page.get_pixmap(dpi=200)
+    img_data = pix.tobytes("png")
+    return Image.open(io.BytesIO(img_data)).convert("RGB")
 
 
 # ==========================================================
