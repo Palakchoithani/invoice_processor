@@ -63,8 +63,12 @@ async def upload_invoice(background_tasks: BackgroundTasks, file: UploadFile = F
     with open(dest, "wb") as f_out:
         shutil.copyfileobj(file.file, f_out)
 
-    result = process_single_invoice(dest)
-    return result
+    try:
+        result = process_single_invoice(dest)
+        return result
+    except Exception as e:
+        log_error(f"Global upload crash: {e}")
+        return {"status": "FAILED", "detail": f"Server crash: {str(e)}"}
 
 
 @app.post("/bulk-upload")
