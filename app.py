@@ -19,9 +19,11 @@ from services.logger import log_info, log_error
 
 app = FastAPI(title="InvoiceFlow", version="1.0.0")
 
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:8000")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[FRONTEND_URL, "http://localhost:8000"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
