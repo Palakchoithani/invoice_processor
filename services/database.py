@@ -1,203 +1,128 @@
-import mysql.connector
-from mysql.connector import Error
+import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from config.db_config import DB_CONFIG
+import firebase_admin
+from firebase_admin import credentials, firestore
+from config.db_config import FIREBASE_KEY_PATH
 from models.invoice_model import Invoice, ProcessingLog
 from services.logger import log_info, log_error
 
+_db = None
 
-def get_connection():
-    """Create and return a MySQL connection."""
+def get_db():
+    global _db
+    if _db is not None:
+        return _db
     try:
-        conn = mysql.connector.connect(**DB_CONFIG)
-        return conn
-    except Error as e:
-        raise ConnectionError(f"Cannot connect to MySQL: {e}")
-
+        # Check if the credentials file exists
+        if os.path.exists(FIREBASE_KEY_PATH):
+            cred = credentials.Certificate(FIREBASE_KEY_PATH)
+            firebase_admin.initialize_app(cred)
+        else:
+            # Fallback to application default credentials (useful for Render deployment with env vars)
+            firebase_admin.initialize_app()
+        _db = firestore.client()
+        log_info("Firebase initialized successfully.")
+        return _db
+    except Exception as e:
+        log_error(f"Cannot initialize Firebase: {e}")
+        raise ConnectionError(f"Firebase Init Error: {e}")
 
 def init_db():
-    """Create tables if they don't exist."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS invoices (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                invoice_number VARCHAR(100) UNIQUE,
-                vendor_name VARCHAR(255),
-                invoice_date DATE,
-                gst_number VARCHAR(30),
-                subtotal DECIMAL(12,2),
-                tax_amount DECIMAL(12,2),
-                total_amount DECIMAL(12,2),
-                file_name VARCHAR(255),
-                processing_time DATETIME,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS processing_logs (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                file_name VARCHAR(255),
-                status VARCHAR(50),
-                error_message TEXT,
-                processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-        log_info("Database tables initialized.")
-    finally:
-        cursor.close()
-        conn.close()
-
+    """Initialize Firebase App (Collections are created implicitly in Firestore)."""
+    get_db()
 
 def check_duplicate(invoice_number: str) -> bool:
     """Returns True if invoice_number already exists in DB."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT id FROM invoices WHERE invoice_number = %s", (invoice_number,))
-        return cursor.fetchone() is not None
-    finally:
-        cursor.close()
-        conn.close()
+    db = get_db()
+    docs = db.collection("invoices").where(filter=firestore.FieldFilter("invoice_number", "==", invoice_number)).limit(1).get()
+    return len(docs) > 0
 
-
-def save_invoice(invoice: Invoice) -> int:
-    """Insert invoice into DB, return new row id."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("""
-            INSERT INTO invoices
-              (invoice_number, vendor_name, invoice_date, gst_number,
-               subtotal, tax_amount, total_amount, file_name, processing_time)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            invoice.invoice_number,
-            invoice.vendor_name,
-            invoice.invoice_date,
-            invoice.gst_number,
-            invoice.subtotal,
-            invoice.tax_amount,
-            invoice.total_amount,
-            invoice.file_name,
-            invoice.processing_time or datetime.now(),
-        ))
-        conn.commit()
-        log_info(f"Saved invoice {invoice.invoice_number} (id={cursor.lastrowid})")
-        return cursor.lastrowid
-    finally:
-        cursor.close()
-        conn.close()
-
+def save_invoice(invoice: Invoice) -> str:
+    """Insert invoice into DB, return document id."""
+    db = get_db()
+    data = {
+        "invoice_number": invoice.invoice_number,
+        "vendor_name": invoice.vendor_name,
+        "invoice_date": invoice.invoice_date.isoformat() if invoice.invoice_date else None,
+        "gst_number": invoice.gst_number,
+        "subtotal": float(invoice.subtotal) if invoice.subtotal else 0.0,
+        "tax_amount": float(invoice.tax_amount) if invoice.tax_amount else 0.0,
+        "total_amount": float(invoice.total_amount) if invoice.total_amount else 0.0,
+        "file_name": invoice.file_name,
+        "processing_time": invoice.processing_time.isoformat() if invoice.processing_time else datetime.now().isoformat(),
+        "created_at": datetime.now().isoformat()
+    }
+    _, doc_ref = db.collection("invoices").add(data)
+    log_info(f"Saved invoice {invoice.invoice_number} (id={doc_ref.id})")
+    return doc_ref.id
 
 def write_log(log: ProcessingLog):
     """Insert a processing log record."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("""
-            INSERT INTO processing_logs (file_name, status, error_message)
-            VALUES (%s, %s, %s)
-        """, (log.file_name, log.status, log.error_message))
-        conn.commit()
-    finally:
-        cursor.close()
-        conn.close()
-
+    db = get_db()
+    data = {
+        "file_name": log.file_name,
+        "status": log.status,
+        "error_message": log.error_message,
+        "processed_at": datetime.now().isoformat()
+    }
+    db.collection("processing_logs").add(data)
 
 def get_all_invoices() -> List[Dict[str, Any]]:
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute("SELECT * FROM invoices ORDER BY created_at DESC")
-        rows = cursor.fetchall()
-        for row in rows:
-            for k, v in row.items():
-                if hasattr(v, 'isoformat'):
-                    row[k] = v.isoformat()
-        return rows
-    finally:
-        cursor.close()
-        conn.close()
+    db = get_db()
+    docs = db.collection("invoices").order_by("created_at", direction=firestore.Query.DESCENDING).get()
+    return [{"id": doc.id, **doc.to_dict()} for doc in docs]
 
-
-def get_invoice_by_id(invoice_id: int) -> Optional[Dict[str, Any]]:
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute("SELECT * FROM invoices WHERE id = %s", (invoice_id,))
-        row = cursor.fetchone()
-        if row:
-            for k, v in row.items():
-                if hasattr(v, 'isoformat'):
-                    row[k] = v.isoformat()
-        return row
-    finally:
-        cursor.close()
-        conn.close()
-
+def get_invoice_by_id(invoice_id: str) -> Optional[Dict[str, Any]]:
+    db = get_db()
+    doc = db.collection("invoices").document(invoice_id).get()
+    if doc.exists:
+        return {"id": doc.id, **doc.to_dict()}
+    return None
 
 def search_invoices(query: str) -> List[Dict[str, Any]]:
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        like = f"%{query}%"
-        cursor.execute("""
-            SELECT * FROM invoices
-            WHERE invoice_number LIKE %s
-               OR vendor_name LIKE %s
-               OR CAST(invoice_date AS CHAR) LIKE %s
-            ORDER BY created_at DESC
-        """, (like, like, like))
-        rows = cursor.fetchall()
-        for row in rows:
-            for k, v in row.items():
-                if hasattr(v, 'isoformat'):
-                    row[k] = v.isoformat()
-        return rows
-    finally:
-        cursor.close()
-        conn.close()
-
+    # In-memory search as Firestore native doesn't support FULLTEXT LIKE '%query%'
+    db = get_db()
+    docs = db.collection("invoices").order_by("created_at", direction=firestore.Query.DESCENDING).get()
+    results = []
+    q_lower = query.lower()
+    for doc in docs:
+        data = doc.to_dict()
+        data["id"] = doc.id
+        
+        # Check against text fields
+        inv_num = (data.get("invoice_number") or "").lower()
+        ven_name = (data.get("vendor_name") or "").lower()
+        inv_date = (data.get("invoice_date") or "").lower()
+        
+        if q_lower in inv_num or q_lower in ven_name or q_lower in inv_date:
+            results.append(data)
+            
+    return results
 
 def get_all_logs() -> List[Dict[str, Any]]:
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute("SELECT * FROM processing_logs ORDER BY processed_at DESC LIMIT 200")
-        rows = cursor.fetchall()
-        for row in rows:
-            for k, v in row.items():
-                if hasattr(v, 'isoformat'):
-                    row[k] = v.isoformat()
-        return rows
-    finally:
-        cursor.close()
-        conn.close()
-
+    db = get_db()
+    docs = db.collection("processing_logs").order_by("processed_at", direction=firestore.Query.DESCENDING).limit(200).get()
+    return [{"id": doc.id, **doc.to_dict()} for doc in docs]
 
 def get_stats() -> Dict[str, Any]:
-    conn = get_connection()
-    cursor = conn.cursor(dictionary=True)
-    try:
-        cursor.execute("SELECT COUNT(*) as total FROM invoices")
-        total = cursor.fetchone()["total"]
-
-        cursor.execute("SELECT COUNT(*) as cnt, status FROM processing_logs GROUP BY status")
-        status_rows = cursor.fetchall()
-        status_map = {r["status"]: r["cnt"] for r in status_rows}
-
-        cursor.execute("SELECT SUM(total_amount) as grand_total FROM invoices")
-        grand = cursor.fetchone()["grand_total"] or 0
-
-        return {
-            "total_invoices": total,
-            "grand_total_amount": float(grand),
-            "processing_summary": status_map,
-        }
-    finally:
-        cursor.close()
-        conn.close()
+    db = get_db()
+    
+    # Calculate invoice stats
+    invoices = db.collection("invoices").get()
+    total_invoices = len(invoices)
+    grand_total = sum((doc.to_dict().get("total_amount") or 0.0) for doc in invoices)
+    
+    # Calculate log stats
+    logs = db.collection("processing_logs").get()
+    status_map = {}
+    for doc in logs:
+        st = doc.to_dict().get("status")
+        if st:
+            status_map[st] = status_map.get(st, 0) + 1
+            
+    return {
+        "total_invoices": total_invoices,
+        "grand_total_amount": float(grand_total),
+        "processing_summary": status_map,
+    }

@@ -102,7 +102,7 @@ def list_invoices(q: Optional[str] = None):
 
 
 @app.get("/invoice/{invoice_id}")
-def get_invoice(invoice_id: int):
+def get_invoice(invoice_id: str):
     row = get_invoice_by_id(invoice_id)
     if not row:
         raise HTTPException(404, "Invoice not found.")
