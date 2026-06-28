@@ -71,14 +71,15 @@ def upload_invoice(background_tasks: BackgroundTasks, file: UploadFile = File(..
         return {"status": "FAILED", "detail": f"Server crash: {str(e)}"}
 
 
+import threading
+
 def _run_bulk_background(saved_paths: List[str]):
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        for _ in executor.map(process_single_invoice, saved_paths):
-            pass
+    # Process sequentially in a single background thread to avoid any GRPC threadpool deadlocks
+    for p in saved_paths:
+        process_single_invoice(p)
 
 @app.post("/bulk-upload")
-def bulk_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+def bulk_upload(files: List[UploadFile] = File(...)):
     """Upload multiple invoices and process them in the background."""
     try:
         saved_paths = []
@@ -91,7 +92,7 @@ def bulk_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = Fil
                 shutil.copyfileobj(upload.file, f_out)
             saved_paths.append(dest)
 
-        background_tasks.add_task(_run_bulk_background, saved_paths)
+        threading.Thread(target=_run_bulk_background, args=(saved_paths,)).start()
 
         results = [{"file": Path(p).name, "status": "QUEUED", "detail": "Processing in background"} for p in saved_paths]
         return {"total": len(results), "results": results}
@@ -101,15 +102,15 @@ def bulk_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = Fil
 
 
 @app.post("/process-folder")
-def process_folder(background_tasks: BackgroundTasks):
+def process_folder():
     """Process all invoices already present in the invoices/ folder in the background."""
-    from services.processor import get_all_pending
+    from services.file_handler import scan_invoices
     try:
-        pending = get_all_pending()
+        pending = scan_invoices()
         if not pending:
             return {"total": 0, "results": []}
 
-        background_tasks.add_task(_run_bulk_background, pending)
+        threading.Thread(target=_run_bulk_background, args=(pending,)).start()
 
         results = [{"file": Path(p).name, "status": "QUEUED", "detail": "Processing in background"} for p in pending]
         return {"total": len(results), "results": results}
