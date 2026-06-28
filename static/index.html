@@ -1021,6 +1021,7 @@
   </footer>
 
   <script>
+    const API_BASE = 'https://invoice-processor-oe4j.onrender.com';
     let uploadMode = 'single';
     let selectedFiles = [];
     let allInvoices = [];
@@ -1173,13 +1174,13 @@
         if (uploadMode === 'single') {
           const fd = new FormData();
           fd.append('file', selectedFiles[0]);
-          const res = await fetch('/upload', { method: 'POST', body: fd });
+          const res = await fetch(API_BASE + '/upload', { method: 'POST', body: fd });
           const data = await res.json();
           renderResult([data], results);
         } else {
           const fd = new FormData();
           selectedFiles.forEach(f => fd.append('files', f));
-          const res = await fetch('/bulk-upload', { method: 'POST', body: fd });
+          const res = await fetch(API_BASE + '/bulk-upload', { method: 'POST', body: fd });
           const data = await res.json();
           renderResult(data.results || [], results);
         }
@@ -1199,7 +1200,7 @@
       const results = document.getElementById('uploadResults');
       results.innerHTML = '<div class="empty">Processing files from server invoices folder...</div>';
       try {
-        const res = await fetch('/process-folder', { method: 'POST' });
+        const res = await fetch(API_BASE + '/process-folder', { method: 'POST' });
         const data = await res.json();
         renderResult(data.results || [], results);
         notify('Folder Intake Complete', `${data.total ?? 0} file(s) handled.`, 'success');
@@ -1236,7 +1237,7 @@
 
     async function loadStats() {
       try {
-        const res = await fetch('/stats');
+        const res = await fetch(API_BASE + '/stats');
         const d = await res.json();
         lastStats = d || {};
         const ps = d.processing_summary || {};
@@ -1263,7 +1264,7 @@
       }
 
       try {
-        const res = await fetch('/invoices');
+        const res = await fetch(API_BASE + '/invoices');
         const rows = await res.json();
         const tbody = document.getElementById('recentBody');
         renderVolumeChart(rows || []);
@@ -1324,7 +1325,7 @@
       const q = document.getElementById('searchInput').value.trim();
       const url = q ? `/invoices?q=${encodeURIComponent(q)}` : '/invoices';
       try {
-        const res = await fetch(url);
+        const res = await fetch(API_BASE + url);
         allInvoices = await res.json();
         const tbody = document.getElementById('invoiceBody');
         if (!allInvoices.length) {
@@ -1371,7 +1372,7 @@
 
     async function loadLogs() {
       try {
-        const res = await fetch('/logs');
+        const res = await fetch(API_BASE + '/logs');
         const rows = await res.json();
         const tbody = document.getElementById('logsBody');
         if (!rows.length) {
