@@ -19,10 +19,14 @@ def get_db():
             import json
             firebase_json = os.getenv("FIREBASE_JSON")
             if firebase_json:
-                # Initialize from raw JSON string (Render environment variable)
-                cred_dict = json.loads(firebase_json)
-                cred = credentials.Certificate(cred_dict)
-                firebase_admin.initialize_app(cred)
+                try:
+                    # Initialize from raw JSON string (Render environment variable)
+                    cred_dict = json.loads(firebase_json)
+                    cred = credentials.Certificate(cred_dict)
+                    firebase_admin.initialize_app(cred)
+                except Exception as parse_e:
+                    log_error(f"Failed to parse FIREBASE_JSON env var: {parse_e}")
+                    raise ValueError(f"Your FIREBASE_JSON environment variable is invalid or corrupted. Please copy-paste it carefully! Error: {parse_e}")
             elif os.path.exists(FIREBASE_KEY_PATH):
                 cred = credentials.Certificate(FIREBASE_KEY_PATH)
                 firebase_admin.initialize_app(cred)
