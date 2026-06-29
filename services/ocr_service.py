@@ -55,15 +55,20 @@ Rules:
 def load_image(file_path: str) -> Image.Image:
     return Image.open(file_path).convert("RGB")
 
-def pdf_to_image(file_path: str) -> Image.Image:
+def pdf_to_images(file_path: str, max_pages: int = 5) -> list[Image.Image]:
     doc = fitz.open(file_path)
     if not doc:
         raise ValueError("PDF contains no pages")
-    page = doc.load_page(0)
-    pix = page.get_pixmap(dpi=200)
-    img_data = pix.tobytes("png")
-    return Image.open(io.BytesIO(img_data)).convert("RGB")
-
+    
+    images = []
+    num_pages = min(len(doc), max_pages)
+    for i in range(num_pages):
+        page = doc.load_page(i)
+        pix = page.get_pixmap(dpi=200)
+        img_data = pix.tobytes("png")
+        images.append(Image.open(io.BytesIO(img_data)).convert("RGB"))
+        
+    return images
 
 # ==========================================================
 # JSON PARSER
@@ -92,7 +97,7 @@ def parse_json_response(text: str) -> dict:
 # GEMINI STRUCTURING
 # ==========================================================
 
-def extract_from_image(image: Image.Image, retries: int = 5) -> Optional[dict]:
+def extract_from_images(images: list[Image.Image], retries: int = 5) -> Optional[dict]:
     if not GEMINI_API_KEY:
         raise EnvironmentError("GEMINI_API_KEY not found")
 
@@ -103,8 +108,9 @@ def extract_from_image(image: Image.Image, retries: int = 5) -> Optional[dict]:
         try:
             log_info(f"Gemini Vision attempt {attempt + 1}")
             
-            # Pass both the prompt and the PIL Image directly to Gemini
-            response = model.generate_content([EXTRACTION_PROMPT, image])
+            # Pass the prompt and ALL images directly to Gemini
+            content = [EXTRACTION_PROMPT] + images
+            response = model.generate_content(content)
             raw_response = response.text.strip() if response.text else ""
             log_info(f"Gemini Response: {raw_response[:300]}")
             
@@ -139,14 +145,14 @@ def extract_invoice_data(file_path: str) -> dict:
     log_info(f"Processing invoice: {file_path}")
 
     if extension == ".pdf":
-        image = pdf_to_image(file_path)
+        images = pdf_to_images(file_path)
     elif extension in [".png", ".jpg", ".jpeg", ".webp"]:
-        image = load_image(file_path)
+        images = [load_image(file_path)]
     else:
         raise ValueError(f"Unsupported file type: {extension}")
 
     # Process using Gemini Vision directly
-    extracted_data = extract_from_image(image)
+    extracted_data = extract_from_images(images)
 
     if extracted_data is None:
         raise RuntimeError("Invoice extraction failed")
