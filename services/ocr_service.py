@@ -1,71 +1,134 @@
 import os
+import io
+import json
 import re
+import time
+
 from pathlib import Path
 from typing import Optional
+
+import google.generativeai as genai
 import fitz  # PyMuPDF
+from PIL import Image
 
 from services.logger import log_info, log_error, log_warning
 
-def extract_text_from_pdf(file_path: str) -> str:
+# ==========================================================
+# CONFIG
+# ==========================================================
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+MODEL_NAME = "gemini-2.5-flash"
+
+EXTRACTION_PROMPT = """
+You are an invoice extraction expert.
+
+Analyze the provided invoice image and convert the data into the following JSON structure.
+
+Return ONLY valid JSON.
+
+{
+  "invoice_number": null,
+  "vendor_name": null,
+  "invoice_date": null,
+  "gst_number": null,
+  "subtotal": null,
+  "tax_amount": null,
+  "total_amount": null
+}
+
+Rules:
+- Return JSON only.
+- No markdown.
+- No explanations.
+- Dates must be YYYY-MM-DD.
+- Amounts must be numeric values.
+- Missing values must be null.
+"""
+
+
+# ==========================================================
+# IMAGE HELPERS
+# ==========================================================
+
+def load_image(file_path: str) -> Image.Image:
+    return Image.open(file_path).convert("RGB")
+
+def pdf_to_image(file_path: str) -> Image.Image:
     doc = fitz.open(file_path)
-    text = ""
-    for page in doc:
-        text += page.get_text("text") + "\n"
-    return text
+    if not doc:
+        raise ValueError("PDF contains no pages")
+    page = doc.load_page(0)
+    pix = page.get_pixmap(dpi=200)
+    img_data = pix.tobytes("png")
+    return Image.open(io.BytesIO(img_data)).convert("RGB")
 
-def parse_with_regex(text: str) -> dict:
-    # 1. Total Amount (Exclude Subtotal, handle Rupee ₹ symbol and newlines)
-    total_match = re.search(r"(?i)(?<!sub\s)(?<!sub)(?:total|amount due|balance due|grand total)[\s\n:]*[\$Rs\₹\.]*\s*([\d,]+\.\d{2})", text)
-    total_amount = float(total_match.group(1).replace(",", "")) if total_match else None
 
-    # 2. Tax Amount (GST, IGST, SGST, CGST, VAT, TAX)
-    tax_match = re.search(r"(?i)(?:tax|gst|igst|cgst|sgst|vat)[\s\n:]*[\$Rs\₹\.]*\s*([\d,]+\.\d{2})", text)
-    tax_amount = float(tax_match.group(1).replace(",", "")) if tax_match else None
+# ==========================================================
+# JSON PARSER
+# ==========================================================
 
-    # 3. Invoice Date (Handle textual months and standard numeric formats)
-    invoice_date = None
-    # Match: 12 Oct 2023, 12th October 2023, Oct 12, 2023
-    alpha_date = re.search(r"(?i)\b(\d{1,2}(?:st|nd|rd|th)?[\s,-]+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,-]+\d{2,4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,-]+\d{1,2}(?:st|nd|rd|th)?[\s,-]+\d{2,4})\b", text)
-    if alpha_date:
-        invoice_date = alpha_date.group(1).strip()
-    else:
-        # Match DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD
-        date_match = re.search(r"(?i)(?:date)[\s\n:]*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})", text)
-        if not date_match:
-            date_match = re.search(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b", text)
-        invoice_date = date_match.group(1) if date_match else None
+def parse_json_response(text: str) -> dict:
+    if not text:
+        raise ValueError("Gemini returned empty response")
+    
+    text = text.strip()
+    text = re.sub(r"^```json", "", text)
+    text = re.sub(r"^```", "", text)
+    text = re.sub(r"```$", "", text)
+    text = text.strip()
 
-    # 4. Invoice Number (Require word boundary, prevent matching the word 'Invoice' itself)
-    inv_match = re.search(r"(?i)\b(?:invoice|inv)\b\s*(?:no|#|num)?[\s\n.:]*((?!invoice\b)[A-Z0-9-/]{4,})", text)
-    invoice_number = inv_match.group(1) if inv_match else None
+    try:
+        return json.loads(text)
+    except Exception:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        raise ValueError(f"Invalid Gemini JSON:\n{text[:500]}")
 
-    # 5. Vendor Name (Look for company suffixes, or fallback)
-    vendor_name = None
-    company_match = re.search(r"(?i)((?:For\s+)?([A-Za-z0-9&\s.,]+(?:Private Limited|Pvt\.?\s*Ltd\.?|LLP|Inc\.?|LLC|Corporation|Corp\.?|Limited|Ltd\.?)))", text)
-    if company_match:
-        vendor_name = company_match.group(2).strip()
-        # Clean up any preceding garbage from multiple lines matching
-        vendor_name = vendor_name.split("\n")[-1].strip()
-        if vendor_name.lower().startswith("for "):
-            vendor_name = vendor_name[4:].strip()
-    else:
-        # Fallback to the first non-empty, non-trivial line
-        lines = [line.strip() for line in text.split("\n") if len(line.strip()) > 4]
-        vendor_name = lines[0] if lines else None
 
-    if vendor_name and len(vendor_name) > 100:
-        vendor_name = vendor_name[:100]
-        
-    return {
-        "invoice_number": invoice_number,
-        "vendor_name": vendor_name,
-        "invoice_date": invoice_date,
-        "gst_number": None,
-        "subtotal": None,
-        "tax_amount": tax_amount,
-        "total_amount": total_amount,
-        "line_items": []
-    }
+# ==========================================================
+# GEMINI STRUCTURING
+# ==========================================================
+
+def extract_from_image(image: Image.Image, retries: int = 5) -> Optional[dict]:
+    if not GEMINI_API_KEY:
+        raise EnvironmentError("GEMINI_API_KEY not found")
+
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel(MODEL_NAME)
+
+    for attempt in range(retries):
+        try:
+            log_info(f"Gemini Vision attempt {attempt + 1}")
+            
+            # Pass both the prompt and the PIL Image directly to Gemini
+            response = model.generate_content([EXTRACTION_PROMPT, image])
+            raw_response = response.text.strip() if response.text else ""
+            log_info(f"Gemini Response: {raw_response[:300]}")
+            
+            return parse_json_response(raw_response)
+        except Exception as e:
+            error_msg = str(e)
+            log_error(f"Gemini attempt failed: {error_msg}")
+            if attempt < retries - 1:
+                # If it's a rate limit error (429), we need to wait much longer
+                if "429" in error_msg or "Quota exceeded" in error_msg:
+                    sleep_time = 30 + (attempt * 10) # 30s, 40s, 50s
+                    log_warning(f"Rate limit hit! Sleeping for {sleep_time} seconds before retrying...")
+                    time.sleep(sleep_time)
+                else:
+                    time.sleep(4)
+            else:
+                raise
+
+    return None
+
+
+# ==========================================================
+# MAIN FUNCTION
+# ==========================================================
 
 def extract_invoice_data(file_path: str) -> dict:
     file_path = str(file_path)
@@ -73,21 +136,34 @@ def extract_invoice_data(file_path: str) -> dict:
         raise FileNotFoundError(f"File not found: {file_path}")
 
     extension = Path(file_path).suffix.lower()
-    log_info(f"Processing invoice via local Regex parser: {file_path}")
+    log_info(f"Processing invoice: {file_path}")
 
     if extension == ".pdf":
-        text = extract_text_from_pdf(file_path)
+        image = pdf_to_image(file_path)
+    elif extension in [".png", ".jpg", ".jpeg", ".webp"]:
+        image = load_image(file_path)
     else:
-        raise ValueError(f"Image OCR is not supported in the local regex parser without Tesseract: {extension}")
+        raise ValueError(f"Unsupported file type: {extension}")
 
-    if not text.strip():
-        raise ValueError("No text could be extracted from the document (likely a scanned image).")
-        
-    log_info(f"Extracted {len(text)} characters of text.")
-    extracted_data = parse_with_regex(text)
+    # Process using Gemini Vision directly
+    extracted_data = extract_from_image(image)
 
-    log_info(f"Final Regex Parsed Data: {extracted_data}")
+    if extracted_data is None:
+        raise RuntimeError("Invoice extraction failed")
+
+    log_info(f"Final Data: {extracted_data}")
     return extracted_data
 
+
+# ==========================================================
+# MODEL TEST
+# ==========================================================
+
+def test_gemini():
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel(MODEL_NAME)
+    response = model.generate_content("Say Hello")
+    print(response.text)
+
 if __name__ == "__main__":
-    print("Local regex parser initialized.")
+    test_gemini()
