@@ -53,5 +53,6 @@ def parse_invoice(raw_data: dict, file_name: str) -> Invoice:
         tax_amount=_parse_amount(raw_data.get("tax_amount")),
         total_amount=_parse_amount(raw_data.get("total_amount")),
         file_name=file_name,
+        line_items=raw_data.get("line_items", []),
         processing_time=datetime.now(),
     )

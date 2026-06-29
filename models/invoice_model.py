@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import date, datetime
 
 
@@ -13,6 +13,7 @@ class Invoice:
     tax_amount: Optional[float] = None
     total_amount: Optional[float] = None
     file_name: Optional[str] = None
+    line_items: Optional[List[Dict[str, Any]]] = field(default_factory=list)
     processing_time: Optional[datetime] = None
 
     def to_dict(self):
@@ -25,6 +26,7 @@ class Invoice:
             "tax_amount": self.tax_amount,
             "total_amount": self.total_amount,
             "file_name": self.file_name,
+            "line_items": self.line_items,
             "processing_time": str(self.processing_time) if self.processing_time else None,
         }
 

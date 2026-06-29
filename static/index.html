@@ -1402,7 +1402,7 @@
     }
 
     function invoiceRow(r, showId) {
-      return `
+      let html = `
         <tr>
           ${showId ? `<td style="color:var(--muted)">${escapeHTML(r.id)}</td>` : ''}
           <td style="font-weight:700; color:var(--navy);">${escapeHTML(r.invoice_number || '—')}</td>
@@ -1414,6 +1414,32 @@
           <td style="font-weight:700; color:var(--success);">${fmtCurrency(r.total_amount)}</td>
           <td style="font-size:0.75rem; color:var(--muted);">${escapeHTML(r.file_name || '—')}</td>
         </tr>`;
+      
+      if (r.line_items && r.line_items.length > 0) {
+        let itemsHtml = `<table style="width:100%; font-size:0.8rem; background:var(--bg-soft); border-radius:6px; margin:4px 0; border: 1px solid var(--border);">
+          <thead>
+            <tr>
+              <th style="padding:4px 8px; text-align:left;">Item Description</th>
+              <th style="padding:4px 8px; text-align:right;">Qty</th>
+              <th style="padding:4px 8px; text-align:right;">Price</th>
+              <th style="padding:4px 8px; text-align:right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>`;
+        r.line_items.forEach(item => {
+          itemsHtml += `
+            <tr>
+              <td style="padding:4px 8px;">${escapeHTML(item.description || '—')}</td>
+              <td style="padding:4px 8px; text-align:right;">${item.quantity || '—'}</td>
+              <td style="padding:4px 8px; text-align:right;">${fmtCurrency(item.unit_price)}</td>
+              <td style="padding:4px 8px; text-align:right;">${fmtCurrency(item.total)}</td>
+            </tr>`;
+        });
+        itemsHtml += `</tbody></table>`;
+        const colspan = showId ? 9 : 8;
+        html += `<tr><td colspan="${colspan}" style="padding: 0 16px 16px 16px; border-bottom: 2px solid var(--border);">${itemsHtml}</td></tr>`;
+      }
+      return html;
     }
 
     function exportCSV() {

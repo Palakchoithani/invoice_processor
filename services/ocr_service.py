@@ -23,28 +23,37 @@ MODEL_NAME = "gemini-2.5-flash"
 
 EXTRACTION_PROMPT = """
 You are an invoice extraction expert.
+Please carefully read the provided invoice image(s) and extract the following fields in valid JSON format.
+If a field is not found, return null for that field. Do NOT return markdown formatting (no ```json).
 
-Analyze the provided invoice image and convert the data into the following JSON structure.
-
-Return ONLY valid JSON.
-
+Required JSON format:
 {
-  "invoice_number": null,
-  "vendor_name": null,
-  "invoice_date": null,
-  "gst_number": null,
-  "subtotal": null,
-  "tax_amount": null,
-  "total_amount": null
+  "invoice_number": "string",
+  "vendor_name": "string",
+  "invoice_date": "YYYY-MM-DD",
+  "gst_number": "string",
+  "subtotal": float,
+  "tax_amount": float,
+  "total_amount": float,
+  "line_items": [
+    {
+      "description": "string",
+      "quantity": float,
+      "unit_price": float,
+      "total": float
+    }
+  ]
 }
 
-Rules:
-- Return JSON only.
-- No markdown.
-- No explanations.
-- Dates must be YYYY-MM-DD.
-- Amounts must be numeric values.
-- Missing values must be null.
+Instructions:
+1. invoice_number: The unique identifier for the invoice (e.g. invoice #, bill no). Look for slashes or dashes.
+2. vendor_name: The company or person who issued the invoice. Usually at the top.
+3. invoice_date: The date the invoice was issued, formatted as YYYY-MM-DD.
+4. gst_number: The GSTIN or tax identification number.
+5. subtotal: The amount before taxes. Do not include currency symbols, just the number.
+6. tax_amount: The total tax applied (GST/VAT). Do not include currency symbols.
+7. total_amount: The final total amount to be paid. Do not include currency symbols.
+8. line_items: Extract all individual items purchased or billed on the invoice. Include the description, quantity, price per unit, and the total line price.
 """
 
 
