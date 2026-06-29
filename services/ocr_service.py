@@ -117,10 +117,28 @@ def extract_from_images(images: list[Image.Image], retries: int = 5) -> Optional
         try:
             log_info(f"Gemini Vision attempt {attempt + 1}")
             
+            # Disable safety filters as invoices often contain names/addresses that trigger false positives
+            safety_settings = [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
+            
             # Pass the prompt and ALL images directly to Gemini
             content = [EXTRACTION_PROMPT] + images
-            response = model.generate_content(content)
-            raw_response = response.text.strip() if response.text else ""
+            response = model.generate_content(content, safety_settings=safety_settings)
+            
+            try:
+                raw_response = response.text.strip() if response.text else ""
+            except ValueError:
+                # Fallback if response.text throws an exception due to safety blocks
+                raw_response = ""
+                if response.candidates and response.candidates[0].content.parts:
+                    raw_response = response.candidates[0].content.parts[0].text.strip()
+                else:
+                    log_warning(f"Gemini response blocked by safety ratings: {response.prompt_feedback}")
+                    raise ValueError("Response blocked by safety filters.")
             log_info(f"Gemini Response: {raw_response[:300]}")
             
             return parse_json_response(raw_response)
