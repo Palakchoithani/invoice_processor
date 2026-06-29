@@ -22,12 +22,18 @@ def parse_with_regex(text: str) -> dict:
     tax_match = re.search(r"(?i)(?:tax|gst|igst|cgst|sgst|vat)[\s\n:]*[\$Rs\₹\.]*\s*([\d,]+\.\d{2})", text)
     tax_amount = float(tax_match.group(1).replace(",", "")) if tax_match else None
 
-    # 3. Invoice Date (Handle standard formats)
-    date_match = re.search(r"(?i)(?:date)[\s\n:]*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", text)
-    if not date_match:
-        # Fallback to just finding any date
-        date_match = re.search(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b", text)
-    invoice_date = date_match.group(1) if date_match else None
+    # 3. Invoice Date (Handle textual months and standard numeric formats)
+    invoice_date = None
+    # Match: 12 Oct 2023, 12th October 2023, Oct 12, 2023
+    alpha_date = re.search(r"(?i)\b(\d{1,2}(?:st|nd|rd|th)?[\s,-]+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,-]+\d{2,4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,-]+\d{1,2}(?:st|nd|rd|th)?[\s,-]+\d{2,4})\b", text)
+    if alpha_date:
+        invoice_date = alpha_date.group(1).strip()
+    else:
+        # Match DD/MM/YYYY, MM/DD/YYYY, or YYYY-MM-DD
+        date_match = re.search(r"(?i)(?:date)[\s\n:]*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})", text)
+        if not date_match:
+            date_match = re.search(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b", text)
+        invoice_date = date_match.group(1) if date_match else None
 
     # 4. Invoice Number (Require word boundary, prevent matching the word 'Invoice' itself)
     inv_match = re.search(r"(?i)\b(?:invoice|inv)\b\s*(?:no|#|num)?[\s\n.:]*((?!invoice\b)[A-Z0-9-/]{4,})", text)
