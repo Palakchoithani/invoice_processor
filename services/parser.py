@@ -44,15 +44,27 @@ def _parse_amount(raw) -> Optional[float]:
 
 def parse_invoice(raw_data: dict, file_name: str) -> Invoice:
     """Convert raw Gemini extraction dict into a typed Invoice object."""
+    subtotal = _parse_amount(raw_data.get("subtotal"))
+    tax_amount = _parse_amount(raw_data.get("tax_amount"))
+    total_amount = _parse_amount(raw_data.get("total_amount"))
+    line_items = raw_data.get("line_items", [])
+
+    # Auto-calculate missing total
+    if not total_amount:
+        if line_items:
+            total_amount = sum(_parse_amount(item.get("total")) or 0.0 for item in line_items)
+        elif subtotal is not None:
+            total_amount = subtotal + (tax_amount or 0.0)
+
     return Invoice(
         invoice_number=raw_data.get("invoice_number") or None,
         vendor_name=raw_data.get("vendor_name") or None,
         invoice_date=_parse_date(raw_data.get("invoice_date")),
         gst_number=raw_data.get("gst_number") or None,
-        subtotal=_parse_amount(raw_data.get("subtotal")),
-        tax_amount=_parse_amount(raw_data.get("tax_amount")),
-        total_amount=_parse_amount(raw_data.get("total_amount")),
+        subtotal=subtotal,
+        tax_amount=tax_amount,
+        total_amount=total_amount,
         file_name=file_name,
-        line_items=raw_data.get("line_items", []),
+        line_items=line_items,
         processing_time=datetime.now(),
     )
