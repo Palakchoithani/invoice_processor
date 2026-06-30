@@ -61,10 +61,10 @@ Field Mappings:
 
 CRITICAL OCR RULES:
 - DEEP SCAN REQUIRED: You must scan the ENTIRE invoice. Do not stop at the item table. Search the Header, Footer, Summary section, Totals section, margins, and the last page for any of the charges listed above.
+- NO REVERSE-ENGINEERING: You are strictly forbidden from calculating values that are not explicitly printed. Never deduce subtotals or taxes mathematically. If a number is not printed character-by-character on the document, DO NOT extract it. Return null instead.
+- DO NOT IGNORE EXPLICIT TOTALS: If the document explicitly prints summary totals (like Sub Total, Tax, and Grand Total at the bottom), you MUST extract those exact printed values. Never override summary totals based on the text inside line item descriptions.
 - IGNORE NON-FINANCIAL NUMBERS: Do NOT extract Product IDs, SKU numbers, Part numbers, Item codes, Phone numbers, Serial numbers, PIN codes, ZIP codes, or PO numbers as monetary values.
 - DETECT MONEY CORRECTLY: Only extract a number as a monetary field if it is explicitly associated with a currency symbol, an amount column, or labeled as Total/Subtotal/Tax.
-- NEVER perform math to guess missing values. Search the entire invoice (headers, footers, summary sections) for these fields.
-- DO NOT strip commas or decimal points if present in the raw text.
 - Return exactly what you see. If a field is missing or not explicitly a monetary value, return null.
 
 INVOICE TEXT:

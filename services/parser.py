@@ -113,8 +113,17 @@ def parse_invoice(raw_data: dict, file_name: str, recovery_pass: bool = False) -
         unit_price = _normalize_ocr_amount(item.get("unit_price")) or 0.0
         ocr_item_total = _normalize_ocr_amount(item.get("total")) or 0.0
         
+        # Check if LLM swapped unit price and total due to OCR column scrambling
+        # If qty > 1, the unit price MUST be smaller than the total. If it's larger, they are swapped.
+        if qty > 1 and unit_price > ocr_item_total and ocr_item_total > 0:
+            validation_logs.append(f"Line {idx+1} ({item.get('description', 'Item')}): Swapped Unit Price ({unit_price}) and Total ({ocr_item_total}) to fix OCR column hallucination.")
+            # Swap them
+            temp = unit_price
+            unit_price = ocr_item_total
+            ocr_item_total = temp
+            
         # Calculate true mathematical total
-        math_item_total = round(qty * unit_price, 2)
+        math_item_total = qty * unit_price
         
         # Cross-check
         if ocr_item_total != math_item_total and math_item_total > 0:
@@ -141,7 +150,7 @@ def parse_invoice(raw_data: dict, file_name: str, recovery_pass: bool = False) -
 
     # 4. Validate Grand Total (0.01 Tolerance)
     misc_charges = shipping_charges + packing_charges + handling_charges + insurance_charges + other_charges
-    calculated_grand_total = round(final_subtotal + tax_amount - discount_amount + misc_charges + round_off, 2)
+    calculated_grand_total = final_subtotal + tax_amount - discount_amount + misc_charges + round_off
     
     final_total = ocr_grand_total
     
