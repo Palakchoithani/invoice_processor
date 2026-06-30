@@ -1188,19 +1188,28 @@
         notify('Select a file', 'Choose one or more invoice files before processing.', 'error');
         return;
       }
-      const spinner = document.getElementById('uploadSpinner');
+      
       const button = document.getElementById('processBtn');
       const results = document.getElementById('uploadResults');
-      spinner.style.display = 'inline-flex';
+      const progressContainer = document.getElementById('progressContainer');
+      const progressBarFill = document.getElementById('progressBarFill');
+      const progressText = document.getElementById('progressText');
+      
       button.disabled = true;
-      results.innerHTML = '<div class="empty">Extracting details... 0 / ' + selectedFiles.length + '</div>';
+      progressContainer.style.display = 'flex';
+      progressBarFill.style.width = '0%';
+      progressText.innerText = '0%';
+      results.innerHTML = '';
 
       try {
         let hasDuplicate = false;
         let allResults = [];
         
         for (let i = 0; i < selectedFiles.length; i++) {
-          results.innerHTML = '<div class="empty">Extracting details... ' + (i) + ' / ' + selectedFiles.length + '</div>';
+          const percent = Math.round((i / selectedFiles.length) * 100);
+          progressBarFill.style.width = percent + '%';
+          progressText.innerText = percent + '% (' + i + '/' + selectedFiles.length + ')';
+          
           const fd = new FormData();
           fd.append('file', selectedFiles[i]);
           
@@ -1213,6 +1222,10 @@
             allResults.push({ file: selectedFiles[i].name, status: "FAILED", detail: e.message });
           }
         }
+        
+        // Complete
+        progressBarFill.style.width = '100%';
+        progressText.innerText = '100% (' + selectedFiles.length + '/' + selectedFiles.length + ')';
         
         renderResult(allResults, results);
         
@@ -1227,8 +1240,10 @@
         results.innerHTML = `<div style="padding:16px; color:var(--danger)">Extraction failed: ${escapeHTML(businessMessage(e.message))}</div>`;
         notify('Processing failed', e.message, 'error');
       } finally {
-        spinner.style.display = 'none';
         button.disabled = false;
+        setTimeout(() => {
+          progressContainer.style.display = 'none';
+        }, 3000);
       }
     }
 
