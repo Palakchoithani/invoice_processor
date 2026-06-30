@@ -44,17 +44,32 @@ def init_db():
     """Initialize Firebase App (Collections are created implicitly in Firestore)."""
     get_db()
 
+def normalize_invoice_number(inv: str) -> str:
+    import re
+    if not inv: return ""
+    return re.sub(r'[^A-Z0-9]', '', str(inv).upper())
+
 def check_duplicate(invoice_number: str) -> bool:
     """Returns True if invoice_number already exists in DB."""
     db = get_db()
-    docs = db.collection("invoices").where(filter=firestore.FieldFilter("invoice_number", "==", invoice_number)).limit(1).get()
-    return len(docs) > 0
+    norm = normalize_invoice_number(invoice_number)
+    if not norm: return False
+    
+    # Try normalized first
+    docs = db.collection("invoices").where(filter=firestore.FieldFilter("normalized_invoice_number", "==", norm)).limit(1).get()
+    if len(docs) > 0:
+        return True
+        
+    # Fallback to exact match (for legacy data)
+    docs2 = db.collection("invoices").where(filter=firestore.FieldFilter("invoice_number", "==", invoice_number)).limit(1).get()
+    return len(docs2) > 0
 
 def save_invoice(invoice: Invoice) -> str:
     """Insert invoice into DB, return document id."""
     db = get_db()
     data = {
         "invoice_number": invoice.invoice_number,
+        "normalized_invoice_number": normalize_invoice_number(invoice.invoice_number),
         "vendor_name": invoice.vendor_name,
         "invoice_date": invoice.invoice_date.isoformat() if invoice.invoice_date else None,
         "gst_number": invoice.gst_number,
