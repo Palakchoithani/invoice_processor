@@ -1432,14 +1432,6 @@
         </tr>`;
       
       let detailsHtml = '';
-      if (r.validation_logs && r.validation_logs.length > 0) {
-        detailsHtml += `<div style="background:#fff3cd; color:#856404; padding:8px 12px; border-radius:4px; border:1px solid #ffeeba; margin-bottom:8px; font-size:0.8rem;">
-            <strong>Arithmetic Corrections Applied:</strong>
-            <ul style="margin:4px 0 0 16px; padding:0;">
-              ${r.validation_logs.map(log => `<li>${escapeHTML(log)}</li>`).join('')}
-            </ul>
-          </div>`;
-      }
       
       if (r.line_items && r.line_items.length > 0) {
         detailsHtml += `<table style="width:100%; font-size:0.8rem; background:var(--bg-soft); border-radius:6px; margin:4px 0; border: 1px solid var(--border);">
