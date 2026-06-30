@@ -127,9 +127,49 @@ def test_massive_hallucination():
         assert "Massive Discrepancy Detected" in str(e)
         print("✓ Massive Hallucination properly rejected")
 
+def test_consensus_algorithm():
+    print("\nTesting Multi-Model Consensus Algorithm...")
+    from services.ai.ai_router import AIRouter
+    
+    router = AIRouter()
+    
+    # 3 failed results. Model A & C agree on tax. Model B & C agree on shipping.
+    failed_results = [
+        { # Model A (Fewest missing fields)
+            "subtotal": 100.0,
+            "tax_amount": 10.0,
+            "shipping_charges": 5.0,
+            "total_amount": 115.0,
+            "invoice_number": "INV-123"
+        },
+        { # Model B
+            "subtotal": 100.0,
+            "tax_amount": 15.0,
+            "shipping_charges": 20.0,
+            "total_amount": 135.0
+        },
+        { # Model C
+            "subtotal": 100.0,
+            "tax_amount": 10.0,  # Matches A
+            "shipping_charges": 20.0, # Matches B
+            "total_amount": 130.0
+        }
+    ]
+    
+    hybrid = router._build_consensus(failed_results)
+    
+    assert hybrid["subtotal"] == 100.0
+    assert hybrid["tax_amount"] == 10.0, "Consensus should be 10.0 (A and C)"
+    assert hybrid["shipping_charges"] == 20.0, "Consensus should be 20.0 (B and C)"
+    assert hybrid["invoice_number"] == "INV-123", "Should retain non-numerical base fields"
+    assert "Cross-Model Consensus" in hybrid["extraction_logs"][0]
+    
+    print("✓ Consensus Algorithm correctly built hybrid output")
+
 if __name__ == "__main__":
     test_normalization()
     test_arithmetic_engine()
     test_tolerance_and_charges()
     test_massive_hallucination()
+    test_consensus_algorithm()
     print("\nAll Tests Passed Successfully! 🚀")

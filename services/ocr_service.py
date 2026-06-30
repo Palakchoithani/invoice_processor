@@ -86,7 +86,9 @@ def extract_invoice_data(file_path: str) -> dict:
     log_info("OCR successful. Routing to AI layer...")
 
     # 2. Pass to AI Router
-    extracted_data = ai_router.route_extraction(invoice_text)
+    # Pass the actual file name (basename) to the router for validation logging
+    file_name = Path(file_path).name
+    extracted_data = ai_router.extract_with_consensus(invoice_text, file_name)
 
     if not extracted_data:
         raise RuntimeError("AI router returned empty extraction data.")
