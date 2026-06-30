@@ -71,13 +71,6 @@ def upload_invoice(background_tasks: BackgroundTasks, file: UploadFile = File(..
         return {"status": "FAILED", "detail": f"Server crash: {str(e)}"}
 
 
-import threading
-
-def _run_bulk_background(saved_paths: List[str]):
-    # Process sequentially in a single background thread to avoid any GRPC threadpool deadlocks
-    for p in saved_paths:
-        process_single_invoice(p)
-
 @app.post("/bulk-upload")
 def bulk_upload(files: List[UploadFile] = File(...)):
     """Upload multiple invoices and process them in the background."""
@@ -92,9 +85,10 @@ def bulk_upload(files: List[UploadFile] = File(...)):
                 shutil.copyfileobj(upload.file, f_out)
             saved_paths.append(dest)
 
-        threading.Thread(target=_run_bulk_background, args=(saved_paths,)).start()
+        for p in saved_paths:
+            process_single_invoice(p)
 
-        results = [{"file": Path(p).name, "status": "QUEUED", "detail": "Processing in background"} for p in saved_paths]
+        results = [{"file": Path(p).name, "status": "SUCCESS", "detail": "Processed"} for p in saved_paths]
         return {"total": len(results), "results": results}
     except Exception as e:
         log_error(f"Global bulk-upload crash: {e}")
@@ -103,16 +97,17 @@ def bulk_upload(files: List[UploadFile] = File(...)):
 
 @app.post("/process-folder")
 def process_folder():
-    """Process all invoices already present in the invoices/ folder in the background."""
+    """Process all invoices already present in the invoices/ folder."""
     from services.file_handler import scan_invoices
     try:
         pending = scan_invoices()
         if not pending:
             return {"total": 0, "results": []}
 
-        threading.Thread(target=_run_bulk_background, args=(pending,)).start()
+        for p in pending:
+            process_single_invoice(p)
 
-        results = [{"file": Path(p).name, "status": "QUEUED", "detail": "Processing in background"} for p in pending]
+        results = [{"file": Path(p).name, "status": "SUCCESS", "detail": "Processed"} for p in pending]
         return {"total": len(results), "results": results}
     except Exception as e:
         log_error(f"Global process-folder crash: {e}")

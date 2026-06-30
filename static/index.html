@@ -1193,25 +1193,28 @@
       const results = document.getElementById('uploadResults');
       spinner.style.display = 'inline-flex';
       button.disabled = true;
-      results.innerHTML = '<div class="empty">Extracting details from invoice files...</div>';
+      results.innerHTML = '<div class="empty">Extracting details... 0 / ' + selectedFiles.length + '</div>';
 
       try {
         let hasDuplicate = false;
-        if (uploadMode === 'single') {
+        let allResults = [];
+        
+        for (let i = 0; i < selectedFiles.length; i++) {
+          results.innerHTML = '<div class="empty">Extracting details... ' + (i) + ' / ' + selectedFiles.length + '</div>';
           const fd = new FormData();
-          fd.append('file', selectedFiles[0]);
-          const res = await fetch(API_BASE + '/upload', { method: 'POST', body: fd });
-          const data = await res.json();
-          renderResult([data], results);
-          if (data.status === 'DUPLICATE') hasDuplicate = true;
-        } else {
-          const fd = new FormData();
-          selectedFiles.forEach(f => fd.append('files', f));
-          const res = await fetch(API_BASE + '/bulk-upload', { method: 'POST', body: fd });
-          const data = await res.json();
-          renderResult(data.results || [], results);
-          if (data.results && data.results.some(r => r.status === 'DUPLICATE')) hasDuplicate = true;
+          fd.append('file', selectedFiles[i]);
+          
+          try {
+            const res = await fetch(API_BASE + '/upload', { method: 'POST', body: fd });
+            const data = await res.json();
+            allResults.push(data);
+            if (data.status === 'DUPLICATE') hasDuplicate = true;
+          } catch (e) {
+            allResults.push({ file: selectedFiles[i].name, status: "FAILED", detail: e.message });
+          }
         }
+        
+        renderResult(allResults, results);
         
         if (hasDuplicate) {
           notify('Duplicate Warning', 'One or more of these invoices have already been scanned before.', 'warn');
