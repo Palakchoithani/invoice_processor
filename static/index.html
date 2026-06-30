@@ -1224,6 +1224,14 @@
       const vendorName = String.fromCharCode(71, 101, 109, 105, 110, 105);
       const shortLabel = String.fromCharCode(65, 73);
       const longLabel = String.fromCharCode(65, 114, 116, 105, 102, 105, 99, 105, 97, 108, 32, 73, 110, 116, 101, 108, 108, 105, 103, 101, 110, 99, 101);
+      
+      // Update Overview Cards
+      // Total Invoices shows the actual number of unique invoices stored in the DB
+      document.getElementById('statTotal').innerText = data.total_invoices || 0;
+      document.getElementById('statAmount').innerText = '$' + (data.grand_total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 });
+      document.getElementById('statErrors').innerText = data.processing_summary.FAILED || 0;
+      document.getElementById('statDuplicates').innerText = data.processing_summary.DUPLICATE || 0;
+
       return String(value ?? '')
         .replaceAll(vendorName, 'Document service')
         .replace(new RegExp(`\\b${shortLabel}\\b`, 'g'), 'automation')
