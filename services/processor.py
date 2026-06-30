@@ -36,6 +36,7 @@ def process_single_invoice(file_path: str) -> dict:
         return {"status": "FAILED", "detail": "File not found"}
 
     file_name = Path(file_path).name
+    file_size = Path(file_path).stat().st_size
     file_hash = calculate_file_hash(file_path)
 
     # 1. Hash Duplicate Prevention
@@ -49,22 +50,27 @@ def process_single_invoice(file_path: str) -> dict:
             "detail": msg,
         }
 
-    # 2. Set to PROCESSING
+    # 2. Set to PROCESSING - OCR Stage
     create_or_update_job(DocumentJob(
         file_hash=file_hash,
         file_name=file_name,
-        status="PROCESSING"
+        status="PROCESSING",
+        stage="OCR",
+        progress=10,
+        file_size=file_size
     ))
     processing_path = move_to_processing(file_path)
 
     log_info(f"Processing invoice: {file_name}")
 
-    def fail_job(msg: str):
+    def fail_job(msg: str, progress: int = 0):
         log_error(msg)
         create_or_update_job(DocumentJob(
             file_hash=file_hash,
             file_name=file_name,
             status="FAILED",
+            stage="FAILED",
+            progress=progress,
             error_message=msg
         ))
         move_to_failed(processing_path)
@@ -74,7 +80,16 @@ def process_single_invoice(file_path: str) -> dict:
     try:
         raw_data, invoice_text = extract_invoice_data(processing_path)
     except Exception as e:
-        return fail_job(f"Extraction failed: {e}")
+        return fail_job(f"Extraction failed: {e}", 20)
+
+    # Transition to AI
+    create_or_update_job(DocumentJob(
+        file_hash=file_hash,
+        file_name=file_name,
+        status="PROCESSING",
+        stage="AI",
+        progress=40
+    ))
 
     # 4. Parse invoice & Handle Mismatch Recovery
     try:
@@ -103,12 +118,21 @@ def process_single_invoice(file_path: str) -> dict:
             invoice.validation_logs.append("OCR Recovery Pass Successfully Bridged Gap")
 
     except Exception as e:
-        return fail_job(f"Parsing failed: {e}")
+        return fail_job(f"Parsing failed: {e}", 50)
+
+    # Transition to VALIDATION
+    create_or_update_job(DocumentJob(
+        file_hash=file_hash,
+        file_name=file_name,
+        status="PROCESSING",
+        stage="VALIDATION",
+        progress=70
+    ))
 
     # 5. Validate invoice
     valid, reason = validate_invoice(invoice)
     if not valid:
-        return fail_job(reason)
+        return fail_job(reason, 75)
 
     # 6. Invoice Number Duplicate Check (Logical Duplicate)
     if check_duplicate(invoice.invoice_number):
@@ -118,7 +142,13 @@ def process_single_invoice(file_path: str) -> dict:
             file_hash=file_hash,
             file_name=file_name,
             status="DUPLICATE",
-            error_message=msg
+            stage="DUPLICATE",
+            progress=100,
+            error_message=msg,
+            invoice_number=invoice.invoice_number,
+            vendor_name=invoice.vendor_name,
+            invoice_date=invoice.invoice_date.isoformat() if invoice.invoice_date else None,
+            total_amount=invoice.total_amount
         ))
         move_to_processed(processing_path)
         return {
@@ -127,6 +157,15 @@ def process_single_invoice(file_path: str) -> dict:
             "detail": msg,
         }
 
+    # Transition to SAVING
+    create_or_update_job(DocumentJob(
+        file_hash=file_hash,
+        file_name=file_name,
+        status="PROCESSING",
+        stage="SAVING",
+        progress=90
+    ))
+
     # 7. Save invoice
     try:
         firestore_id = save_invoice(invoice)
@@ -134,8 +173,14 @@ def process_single_invoice(file_path: str) -> dict:
             file_hash=file_hash,
             file_name=file_name,
             status="PROCESSED",
+            stage="COMPLETED",
+            progress=100,
             invoice_id=firestore_id,
-            total_amount=invoice.total_amount
+            invoice_number=invoice.invoice_number,
+            vendor_name=invoice.vendor_name,
+            invoice_date=invoice.invoice_date.isoformat() if invoice.invoice_date else None,
+            total_amount=invoice.total_amount,
+            processing_time=invoice.processing_time.isoformat() if invoice.processing_time else datetime.now().isoformat()
         ))
         move_to_processed(processing_path)
         log_info(f"Invoice saved. Firestore ID={firestore_id}")
@@ -148,7 +193,7 @@ def process_single_invoice(file_path: str) -> dict:
             "invoice": invoice.to_dict(),
         }
     except Exception as e:
-        return fail_job(f"Save failed: {e}")
+        return fail_job(f"Save failed: {e}", 95)
 
 def process_all_invoices() -> list[dict]:
 

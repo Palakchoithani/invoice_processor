@@ -62,9 +62,16 @@ class ProcessingLog:
 class DocumentJob:
     file_hash: str
     file_name: str
-    status: str  # PENDING | PROCESSING | PROCESSED | FAILED
+    status: str  # PENDING | QUEUED | PROCESSING | PROCESSED | FAILED | DUPLICATE
+    progress: int = 0
+    stage: str = "PENDING"
+    file_size: Optional[int] = 0
     invoice_id: Optional[str] = None
+    invoice_number: Optional[str] = None
+    vendor_name: Optional[str] = None
+    invoice_date: Optional[str] = None
     total_amount: Optional[float] = None
+    processing_time: Optional[str] = None
     error_message: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -74,8 +81,15 @@ class DocumentJob:
             "file_hash": self.file_hash,
             "file_name": self.file_name,
             "status": self.status,
+            "progress": self.progress,
+            "stage": self.stage,
+            "file_size": self.file_size,
             "invoice_id": self.invoice_id,
+            "invoice_number": self.invoice_number,
+            "vendor_name": self.vendor_name,
+            "invoice_date": self.invoice_date,
             "total_amount": self.total_amount,
+            "processing_time": self.processing_time,
             "error_message": self.error_message,
             "created_at": self.created_at.isoformat() if self.created_at else datetime.now().isoformat(),
             "updated_at": self.updated_at.isoformat() if self.updated_at else datetime.now().isoformat(),

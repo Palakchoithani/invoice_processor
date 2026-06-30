@@ -57,3 +57,12 @@ def move_to_failed(file_path: str) -> str:
     dest = move_file(file_path, FAILED_DIR)
     log_info(f"Moved to failed: {dest}")
     return dest
+
+
+def move_from_failed_to_pending(file_name: str) -> str:
+    src = os.path.join(FAILED_DIR, file_name)
+    if not os.path.exists(src):
+        raise FileNotFoundError(f"File {file_name} not found in failed folder.")
+    dest = move_file(src, PENDING_DIR)
+    log_info(f"Moved from failed to pending for retry: {dest}")
+    return dest

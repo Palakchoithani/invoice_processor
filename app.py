@@ -175,12 +175,51 @@ def get_invoice(invoice_id: str):
     return row
 
 
-# ── Logs & Stats ──────────────────────────────────────────────────────────────
+# ── Jobs & Stats ──────────────────────────────────────────────────────────────
 
-@app.get("/logs")
-def get_logs():
-    return get_all_logs()
+@app.get("/jobs")
+def get_jobs():
+    from services.database import get_all_jobs
+    return get_all_jobs()
 
+@app.post("/retry/{file_hash}")
+def retry_job(file_hash: str, background_tasks: BackgroundTasks):
+    from services.database import get_db
+    from services.file_handler import move_from_failed_to_pending
+    db = get_db()
+    job_ref = db.collection("document_jobs").document(file_hash)
+    job_doc = job_ref.get()
+    if not job_doc.exists:
+        raise HTTPException(404, "Job not found")
+    
+    data = job_doc.to_dict()
+    file_name = data.get("file_name")
+    
+    # Move file and reset state
+    try:
+        new_path = move_from_failed_to_pending(file_name)
+        create_or_update_job(DocumentJob(
+            file_hash=file_hash,
+            file_name=file_name,
+            status="QUEUED",
+            stage="PENDING",
+            progress=0
+        ))
+        background_tasks.add_task(process_single_invoice, new_path)
+        return {"status": "success", "message": "Job queued for retry"}
+    except Exception as e:
+        raise HTTPException(500, f"Retry failed: {e}")
+
+@app.delete("/delete/{file_hash}")
+def delete_job(file_hash: str):
+    from services.database import get_db
+    db = get_db()
+    job_ref = db.collection("document_jobs").document(file_hash)
+    if not job_ref.get().exists:
+        raise HTTPException(404, "Job not found")
+    
+    job_ref.delete()
+    return {"status": "success", "message": "Job deleted"}
 
 @app.get("/stats")
 def stats():

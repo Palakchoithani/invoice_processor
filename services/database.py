@@ -141,20 +141,14 @@ def search_invoices(query: str) -> List[Dict[str, Any]]:
             
     return results
 
-def get_all_logs() -> List[Dict[str, Any]]:
-    """Return all jobs for the dashboard recent logs list."""
+def get_all_jobs() -> List[Dict[str, Any]]:
+    """Return all jobs for the realtime dashboard table."""
     db = get_db()
-    docs = db.collection("document_jobs").order_by("updated_at", direction=firestore.Query.DESCENDING).limit(200).get()
+    docs = db.collection("document_jobs").order_by("updated_at", direction=firestore.Query.DESCENDING).limit(500).get()
     results = []
     for doc in docs:
         d = doc.to_dict()
-        results.append({
-            "id": doc.id,
-            "file_name": d.get("file_name"),
-            "status": d.get("status"),
-            "error_message": d.get("error_message"),
-            "processed_at": d.get("updated_at")
-        })
+        results.append(d)
     return results
 
 def get_stats() -> Dict[str, Any]:
@@ -167,13 +161,14 @@ def get_stats() -> Dict[str, Any]:
     failed = 0
     processing = 0
     pending = 0
+    queued = 0
     duplicates = 0
     grand_total = 0.0
     
     for doc in docs:
         data = doc.to_dict()
         st = data.get("status")
-        if st == "PROCESSED":
+        if st == "PROCESSED" or st == "SUCCESS":
             processed += 1
             grand_total += float(data.get("total_amount") or 0.0)
         elif st == "FAILED":
@@ -184,6 +179,8 @@ def get_stats() -> Dict[str, Any]:
             processing += 1
         elif st == "PENDING":
             pending += 1
+        elif st == "QUEUED":
+            queued += 1
             
     return {
         "total_invoices": total_invoices,
@@ -193,6 +190,7 @@ def get_stats() -> Dict[str, Any]:
             "FAILED": failed,
             "DUPLICATE": duplicates,
             "PROCESSING": processing,
-            "PENDING": pending
+            "PENDING": pending,
+            "QUEUED": queued
         }
     }
