@@ -125,8 +125,8 @@ def parse_invoice(raw_data: dict, file_name: str, recovery_pass: bool = False) -
         # Calculate true mathematical total
         math_item_total = qty * unit_price
         
-        # Cross-check
-        if ocr_item_total != math_item_total and math_item_total > 0:
+        # Cross-check using a small tolerance for floating point precision issues (e.g. 20.0 * 13.72 = 274.40000000000003)
+        if abs(ocr_item_total - math_item_total) > 0.01 and math_item_total > 0:
             deduct_confidence(0.10, f"Line {idx+1} ({item.get('description', 'Item')}): OCR Total {ocr_item_total} replaced by calculated {math_item_total} ({qty}x{unit_price})")
             final_item_total = math_item_total
         else:
@@ -137,7 +137,7 @@ def parse_invoice(raw_data: dict, file_name: str, recovery_pass: bool = False) -
             "quantity": qty,
             "unit_price": unit_price,
             "total": final_item_total,
-            "original_total": ocr_item_total if ocr_item_total != final_item_total else None
+            "original_total": ocr_item_total if abs(ocr_item_total - final_item_total) > 0.01 else None
         })
         
         calculated_subtotal += final_item_total
