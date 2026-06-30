@@ -75,6 +75,10 @@ def test_tolerance_and_charges():
         "other_charges": 1.0,
         "round_off": -0.50,
         "total_amount": 133.0, # Math: 100 + 5 - 10 + (20 + 5 + 2.5 + 10 + 1) - 0.5 = 133.0
+        "extraction_logs": [
+            "Shipping: Page 1 -> Footer -> 20.0",
+            "Packing: Page 1 -> Header -> 5.0"
+        ],
         "line_items": [
             {
                 "description": "Item 1",
@@ -94,7 +98,8 @@ def test_tolerance_and_charges():
     # Verify it accepted the PRINTED total because difference is exactly 0.01
     assert invoice.total_amount == 133.01, f"Expected 133.01, got {invoice.total_amount}"
     assert any("Accepted" in log for log in invoice.validation_logs)
-    print("✓ Tolerance & Extra Charges passed")
+    assert len(invoice.extraction_logs) == 2, "Failed to parse extraction_logs"
+    print("✓ Tolerance & Extra Charges & Extraction Logs passed")
 
 def test_massive_hallucination():
     print("\nTesting Massive Hallucination Rejection...")

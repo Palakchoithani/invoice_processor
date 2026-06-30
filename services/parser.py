@@ -177,5 +177,6 @@ def parse_invoice(raw_data: dict, file_name: str) -> Invoice:
         line_items=validated_line_items,
         confidence_score=round(max(0.0, confidence_score), 2),
         validation_logs=validation_logs,
+        extraction_logs=raw_data.get("extraction_logs", []),
         processing_time=datetime.now(),
     )

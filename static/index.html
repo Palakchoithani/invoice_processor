@@ -1442,7 +1442,7 @@
       
       let detailsHtml = '';
       
-      if (miscSum !== 0 || r.validation_logs?.length > 0) {
+      if (miscSum !== 0 || r.validation_logs?.length > 0 || r.extraction_logs?.length > 0) {
         detailsHtml += `<div style="display:flex; gap:16px; margin-bottom:8px;">`;
         
         if (miscSum !== 0) {
@@ -1464,6 +1464,15 @@
               <strong>Math Validation Logs:</strong>
               <ul style="margin:4px 0 0 16px; padding:0;">
                 ${r.validation_logs.map(log => `<li>${escapeHTML(log)}</li>`).join('')}
+              </ul>
+            </div>`;
+        }
+
+        if (r.extraction_logs && r.extraction_logs.length > 0) {
+          detailsHtml += `<div style="flex:1; background:var(--bg-soft); color:var(--blue-accent); padding:8px 12px; border-radius:4px; border:1px solid var(--border); font-size:0.8rem;">
+              <strong>OCR Extraction Trace:</strong>
+              <ul style="margin:4px 0 0 16px; padding:0;">
+                ${r.extraction_logs.map(log => `<li>${escapeHTML(log)}</li>`).join('')}
               </ul>
             </div>`;
         }

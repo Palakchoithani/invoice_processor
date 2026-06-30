@@ -23,6 +23,7 @@ class Invoice:
     line_items: Optional[List[Dict[str, Any]]] = field(default_factory=list)
     confidence_score: float = 1.0
     validation_logs: List[str] = field(default_factory=list)
+    extraction_logs: List[str] = field(default_factory=list)
     processing_time: Optional[datetime] = None
 
     def to_dict(self):
@@ -45,6 +46,7 @@ class Invoice:
             "line_items": self.line_items,
             "confidence_score": self.confidence_score,
             "validation_logs": self.validation_logs,
+            "extraction_logs": self.extraction_logs,
             "processing_time": str(self.processing_time) if self.processing_time else None,
         }
 
