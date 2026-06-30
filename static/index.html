@@ -933,10 +933,9 @@
     <!-- ── SECTION: UPLOAD ── -->
     <div id="sec-upload" class="section">
       <div class="panel">
-        <div class="tabs">
-          <button class="tab active" onclick="setUploadMode('single', this)">Single Invoice</button>
-          <button class="tab" onclick="setUploadMode('bulk', this)">Bulk Upload</button>
-          <button class="tab" onclick="setUploadMode('folder', this)">Process Server Folder</button>
+        <div class="panel-title" style="margin-bottom: 24px;">
+          <h2>Process Invoices</h2>
+          <p>Extract data from PDF or image files instantly.</p>
         </div>
 
         <div id="uploadFileArea">
@@ -948,20 +947,17 @@
             <span id="dropSubtext" style="margin-bottom: 8px;">PDF, JPEG, JPG, and PNG formats accepted</span>
             <button class="btn btn-outline" style="border-radius: 20px; padding: 6px 16px; font-size: 0.8rem; font-weight: 700; color: var(--navy); border-color: var(--blue-soft); background: var(--surface);">Choose File</button>
           </div>
-          <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png" onchange="onFileSelect(event)" style="display: none;" />
+          <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png" multiple onchange="onFileSelect(event)" style="display: none;" />
           
-          <div class="action-row">
+          <div class="action-row" style="display:flex; align-items:center; gap:16px;">
             <button class="btn btn-primary" id="processBtn" onclick="submitUpload()">Process Now</button>
-            <span id="uploadSpinner" style="display:none; font-size:0.88rem; color:var(--muted);"><span class="spinner" style="margin-right:8px;"></span>Extracting metadata...</span>
+            <div id="progressContainer" style="display:none; flex:1; align-items:center; gap:12px;">
+              <div style="flex:1; height:8px; background:var(--bg-soft); border-radius:4px; overflow:hidden;">
+                <div id="progressBarFill" style="width:0%; height:100%; background:var(--primary); transition:width 0.3s ease;"></div>
+              </div>
+              <span id="progressText" style="font-size:0.88rem; color:var(--text); font-weight:600; white-space:nowrap;">0%</span>
+            </div>
           </div>
-        </div>
-
-        <div id="uploadFolderArea" style="display:none">
-          <p style="color:var(--muted); margin-bottom:16px; font-size:0.9rem;">
-            Place invoice files in the <code>invoices/</code> directory on the server, then start processing.
-          </p>
-          <button class="btn btn-success" onclick="processFolder()">Process Folder</button>
-          <span id="folderSpinner" style="display:none; margin-left:12px; font-size:0.88rem; color:var(--muted);"><span class="spinner"></span>Processing…</span>
         </div>
 
         <div id="uploadResults" style="margin-top:20px;"></div>
