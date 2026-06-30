@@ -69,3 +69,4 @@ firebase_credentials.json
 
 # dataconnect generated files
 .dataconnect
+invoices/
