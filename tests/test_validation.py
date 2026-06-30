@@ -42,7 +42,7 @@ def test_arithmetic_engine():
         ]
     }
 
-    invoice = parse_invoice(malformed_raw_data, "test.pdf")
+    invoice = parse_invoice(malformed_raw_data, "test.pdf", recovery_pass=True)
     
     # Verify Math
     assert invoice.line_items[0]["total"] == 500.0
@@ -121,7 +121,7 @@ def test_massive_hallucination():
     # Threshold is 10% of 1000 = 100.
     # Difference (343650) > Threshold (100) -> Should raise ValueError
     try:
-        parse_invoice(malformed_raw_data, "test.pdf")
+        parse_invoice(malformed_raw_data, "test.pdf", recovery_pass=True)
         assert False, "Should have raised ValueError for massive discrepancy"
     except ValueError as e:
         assert "Massive Discrepancy Detected" in str(e)

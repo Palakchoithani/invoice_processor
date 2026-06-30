@@ -38,14 +38,11 @@ def process_single_invoice(file_path: str) -> dict:
     # 1. Extract invoice data
     # --------------------------------------------------
     try:
-        raw_data = extract_invoice_data(file_path)
+        raw_data, invoice_text = extract_invoice_data(file_path)
 
     except Exception as e:
-
         msg = f"Extraction failed: {e}"
-
         log_error(msg)
-
         write_log(
             ProcessingLog(
                 file_name=file_name,
@@ -53,9 +50,7 @@ def process_single_invoice(file_path: str) -> dict:
                 error_message=msg,
             )
         )
-
         move_to_failed(file_path)
-
         return {
             "file": file_name,
             "status": "FAILED",
@@ -63,21 +58,45 @@ def process_single_invoice(file_path: str) -> dict:
         }
 
     # --------------------------------------------------
-    # 2. Parse invoice
+    # 2. Parse invoice & Handle Mismatch Recovery
     # --------------------------------------------------
     try:
-
-        invoice = parse_invoice(
-            raw_data,
-            file_name,
-        )
+        from services.parser import MismatchException
+        from services.ocr_service import ai_router
+        try:
+            invoice = parse_invoice(raw_data, file_name)
+        except MismatchException as mismatch:
+            log_warning(f"Math Mismatch Detected: {mismatch}. Triggering OCR Recovery Pass...")
+            # Trigger secondary recovery pass
+            recovered_data = ai_router.recover_missing_charges(
+                invoice_text=invoice_text,
+                printed_total=mismatch.printed_total,
+                calculated_total=mismatch.calculated_total,
+                gap=mismatch.gap
+            )
+            
+            # Merge the recovered fields into raw_data
+            for key in ["shipping_charges", "packing_charges", "handling_charges", "insurance_charges", "tax_amount", "discount_amount", "other_charges", "round_off"]:
+                if recovered_data.get(key) is not None:
+                    raw_data[key] = recovered_data[key]
+                    
+            if "extraction_logs" in recovered_data and recovered_data["extraction_logs"]:
+                if "extraction_logs" not in raw_data:
+                    raw_data["extraction_logs"] = []
+                raw_data["extraction_logs"].extend(recovered_data["extraction_logs"])
+                
+            # Reparse with the new merged data.
+            # If it STILL fails math, we just let it fail or accept it depending on threshold.
+            # We want it to throw ValueError if threshold is exceeded this time.
+            invoice = parse_invoice(raw_data, file_name, recovery_pass=True)
+            
+            # Deduct confidence for requiring a second pass
+            invoice.confidence_score = round(max(0.0, invoice.confidence_score - 0.20), 2)
+            invoice.validation_logs.append("OCR Recovery Pass Successfully Bridged Gap")
 
     except Exception as e:
-
         msg = f"Parsing failed: {e}"
-
         log_error(msg)
-
         write_log(
             ProcessingLog(
                 file_name=file_name,
@@ -85,9 +104,7 @@ def process_single_invoice(file_path: str) -> dict:
                 error_message=msg,
             )
         )
-
         move_to_failed(file_path)
-
         return {
             "file": file_name,
             "status": "FAILED",

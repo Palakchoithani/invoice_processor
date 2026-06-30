@@ -4,6 +4,13 @@ from typing import Optional, Tuple, List, Any
 from models.invoice_model import Invoice
 from services.logger import log_warning
 
+class MismatchException(Exception):
+    def __init__(self, printed_total: float, calculated_total: float, gap: float, message: str):
+        self.printed_total = printed_total
+        self.calculated_total = calculated_total
+        self.gap = gap
+        super().__init__(message)
+
 DATE_FORMATS = [
     "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y",
     "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y",
@@ -71,7 +78,7 @@ def _normalize_ocr_amount(raw: Any) -> Optional[float]:
     except ValueError:
         return None
 
-def parse_invoice(raw_data: dict, file_name: str) -> Invoice:
+def parse_invoice(raw_data: dict, file_name: str, recovery_pass: bool = False) -> Invoice:
     """
     ARITHMETIC ENGINE
     Converts raw OCR JSON into a typed Invoice object, completely rejecting
@@ -145,15 +152,24 @@ def parse_invoice(raw_data: dict, file_name: str) -> Invoice:
             validation_logs.append(f"Printed total {ocr_grand_total} matched calculated total {calculated_grand_total} (Accepted)")
         final_total = ocr_grand_total
     else:
-        # Complete mismatch. Math is wrong or OCR missed something entirely.
+        # Mismatch detected! 
         difference = abs(ocr_grand_total - calculated_grand_total)
         
-        # Hardware-fail if the difference is massive (e.g. LLM read a ZIP code as the total)
-        # Threshold: 10% of the calculated total, or at least a minimum $5 margin to avoid dividing by zero or failing small subtotals
+        if not recovery_pass and ocr_grand_total > 0:
+            # Trigger Multi-Pass Recovery Pipeline on the first pass
+            raise MismatchException(
+                printed_total=ocr_grand_total,
+                calculated_total=calculated_grand_total,
+                gap=round(difference, 2),
+                message=f"Discrepancy Detected. Printed: {ocr_grand_total}, Calculated: {calculated_grand_total}. Missing: {round(difference, 2)}"
+            )
+            
+        # If we are here, we are on the recovery pass (or printed total was 0)
+        # Apply the threshold block logic
         threshold = max(calculated_grand_total * 0.10, 5.0)
         
         if ocr_grand_total > 0 and difference > threshold:
-            raise ValueError(f"Massive Discrepancy Detected: The extracted printed total ({ocr_grand_total}) completely mismatches the calculated mathematical total ({calculated_grand_total}). This indicates a severe hallucination or missing fields. Extraction blocked.")
+            raise ValueError(f"Massive Discrepancy Detected: The printed total ({ocr_grand_total}) mismatches math ({calculated_grand_total}) even after recovery. Extraction blocked.")
             
         deduct_confidence(0.25, f"Grand Total Override: Printed {ocr_grand_total} replaced by Math {calculated_grand_total} (Subtotal {final_subtotal} + Tax {tax_amount} + Misc {misc_charges} + RoundOff {round_off} - Discount {discount_amount})")
         final_total = calculated_grand_total

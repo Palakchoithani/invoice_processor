@@ -24,3 +24,20 @@ class GroqProvider(BaseProvider):
         
         raw_text = response.choices[0].message.content
         return self.parse_json_response(raw_text)
+
+    def recover_invoice(self, invoice_text: str, printed_total: float, calculated_total: float, gap: float) -> dict:
+        from services.ai.base_provider import RECOVERY_PROMPT
+        prompt = RECOVERY_PROMPT.format(printed_total=printed_total, calculated_total=calculated_total, gap=gap)
+        prompt += f"\n\n{invoice_text}"
+        
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            max_tokens=1024,
+        )
+        
+        raw_text = response.choices[0].message.content
+        return self.parse_json_response(raw_text)

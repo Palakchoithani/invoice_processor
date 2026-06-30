@@ -92,4 +92,4 @@ def extract_invoice_data(file_path: str) -> dict:
         raise RuntimeError("AI router returned empty extraction data.")
 
     log_info(f"Final Data: {extracted_data}")
-    return extracted_data
+    return extracted_data, invoice_text

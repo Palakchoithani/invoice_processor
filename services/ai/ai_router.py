@@ -77,3 +77,34 @@ class AIRouter:
         Single extraction attempt wrapped in Tenacity for exponential backoff retries.
         """
         return provider.extract_invoice(invoice_text)
+
+    def recover_missing_charges(self, invoice_text: str, printed_total: float, calculated_total: float, gap: float) -> dict:
+        """
+        Routes the recovery request through the priority queue.
+        """
+        for provider_name in self.priority:
+            if provider_name not in self.providers:
+                continue
+                
+            provider = self.providers[provider_name]
+            log_info(f"Trying Recovery with {provider_name.capitalize()}...")
+            
+            try:
+                result = self._attempt_recovery(provider, invoice_text, printed_total, calculated_total, gap)
+                log_info(f"Recovery Success. ({provider_name.capitalize()})")
+                return result
+            except Exception as e:
+                log_warning(f"Recovery {provider_name.capitalize()} failed. Reason: {e}")
+                continue
+                
+        log_error("All available AI providers failed the recovery pass.")
+        raise RuntimeError("AI recovery failed: All providers exhausted or unavailable.")
+
+    @retry(
+        stop=stop_after_attempt(2), 
+        wait=wait_exponential(multiplier=1, min=2, max=5), 
+        reraise=True,
+        before_sleep=before_sleep_log(logging.getLogger("uvicorn.error"), logging.WARNING)
+    )
+    def _attempt_recovery(self, provider, invoice_text: str, printed_total: float, calculated_total: float, gap: float) -> dict:
+        return provider.recover_invoice(invoice_text, printed_total, calculated_total, gap)
