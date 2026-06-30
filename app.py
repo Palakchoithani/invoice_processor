@@ -12,7 +12,7 @@ from config.db_config import PENDING_DIR, PROCESSING_DIR, FAILED_DIR, SUPPORTED_
 from services.processor import process_single_invoice
 from services.database import (
     init_db, get_all_invoices, get_invoice_by_id,
-    search_invoices, get_all_logs, get_stats, get_job_by_hash, create_or_update_job
+    search_invoices, get_stats, get_job_by_hash, create_or_update_job
 )
 from models.invoice_model import DocumentJob
 from services.file_handler import ensure_dirs, calculate_file_hash, move_to_failed
