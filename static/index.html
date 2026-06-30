@@ -1470,7 +1470,13 @@
         return;
       }
       container.innerHTML = items.map(r => {
-        const cls = r.status === 'SUCCESS' ? 'badge-success' : r.status === 'DUPLICATE' ? 'badge-dup' : r.status === 'QUEUED' ? 'badge-dup' : 'badge-fail';
+        let cls = 'badge-fail';
+        if (r.status === 'SUCCESS' || r.status === 'PROCESSED') cls = 'badge-success';
+        else if (r.status === 'DUPLICATE' || r.status === 'QUEUED' || r.status === 'PROCESSING' || r.status === 'PENDING') cls = 'badge-dup';
+        
+        let displayStatus = r.status;
+        if (displayStatus === 'PROCESSED') displayStatus = 'SUCCESS';
+
         const inv = r.invoice ? `${fmtCurrency(r.invoice.total_amount)} · ${escapeHTML(r.invoice.vendor_name || '')}` : '';
         return `
           <div style="background:var(--bg-soft); padding:12px; border-radius:6px; border:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
@@ -1480,7 +1486,7 @@
             </div>
             <div style="display:flex; align-items:center; gap:12px;">
               <span style="font-size:0.85rem; font-weight:600;">${inv}</span>
-              <span class="badge ${cls}">${escapeHTML(r.status || 'STATUS')}</span>
+              <span class="badge ${cls}">${escapeHTML(displayStatus || 'STATUS')}</span>
             </div>
           </div>`;
       }).join('');
