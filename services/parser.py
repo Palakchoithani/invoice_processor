@@ -77,80 +77,96 @@ def parse_invoice(raw_data: dict, file_name: str) -> Invoice:
     Converts raw OCR JSON into a typed Invoice object, completely rejecting
     LLM math and strictly recalculating every value from the ground up.
     """
-    logs = []
+    validation_logs = []
     confidence_score = 1.0
 
-    # 1. Extract raw line items
-    raw_line_items = raw_data.get("line_items") or []
+    def deduct_confidence(amount: float, reason: str):
+        nonlocal confidence_score
+        confidence_score -= amount
+        validation_logs.append(reason)
+
+    # 1. Extract and Normalize Document-Level Fields
+    ocr_subtotal = _normalize_ocr_amount(raw_data.get("subtotal")) or 0.0
+    tax_amount = _normalize_ocr_amount(raw_data.get("tax_amount")) or 0.0
+    discount_amount = _normalize_ocr_amount(raw_data.get("discount_amount")) or 0.0
+    shipping_charges = _normalize_ocr_amount(raw_data.get("shipping_charges")) or 0.0
+    packing_charges = _normalize_ocr_amount(raw_data.get("packing_charges")) or 0.0
+    handling_charges = _normalize_ocr_amount(raw_data.get("handling_charges")) or 0.0
+    insurance_charges = _normalize_ocr_amount(raw_data.get("insurance_charges")) or 0.0
+    other_charges = _normalize_ocr_amount(raw_data.get("other_charges")) or 0.0
+    round_off = _normalize_ocr_amount(raw_data.get("round_off")) or 0.0
+    ocr_grand_total = _normalize_ocr_amount(raw_data.get("total_amount")) or 0.0
+
+    # 2. Extract and Validate Line Items
     validated_line_items = []
     calculated_subtotal = 0.0
 
-    for idx, item in enumerate(raw_line_items):
+    for idx, item in enumerate(raw_data.get("line_items", [])):
         qty = _normalize_ocr_amount(item.get("quantity")) or 1.0
-        price = _normalize_ocr_amount(item.get("unit_price")) or 0.0
-        ocr_total = _normalize_ocr_amount(item.get("total")) or 0.0
+        unit_price = _normalize_ocr_amount(item.get("unit_price")) or 0.0
+        ocr_item_total = _normalize_ocr_amount(item.get("total")) or 0.0
         
-        # NEVER trust the OCR total. Always calculate it mathematically.
-        math_total = round(qty * price, 2)
+        # Calculate true mathematical total
+        math_item_total = round(qty * unit_price, 2)
         
-        if ocr_total != math_total:
-            logs.append(f"Line {idx+1} ({item.get('description')}): OCR Total {ocr_total} replaced by calculated {math_total} ({qty}x{price})")
-            confidence_score -= 0.05
-            
-        validated_item = {
-            "description": str(item.get("description", "Unknown Item")),
+        # Cross-check
+        if ocr_item_total != math_item_total and math_item_total > 0:
+            deduct_confidence(0.10, f"Line {idx+1} ({item.get('description', 'Item')}): OCR Total {ocr_item_total} replaced by calculated {math_item_total} ({qty}x{unit_price})")
+            final_item_total = math_item_total
+        else:
+            final_item_total = ocr_item_total
+
+        validated_line_items.append({
+            "description": item.get("description", ""),
             "quantity": qty,
-            "unit_price": price,
-            "original_total": ocr_total,
-            "total": math_total
-        }
-        validated_line_items.append(validated_item)
-        calculated_subtotal += math_total
+            "unit_price": unit_price,
+            "total": final_item_total,
+            "original_total": ocr_item_total if ocr_item_total != final_item_total else None
+        })
+        
+        calculated_subtotal += final_item_total
 
-    calculated_subtotal = round(calculated_subtotal, 2)
-
-    # 2. Extract Invoice Totals
-    ocr_subtotal = _normalize_ocr_amount(raw_data.get("subtotal")) or 0.0
-    ocr_tax = _normalize_ocr_amount(raw_data.get("tax_amount")) or 0.0
-    ocr_discount = _normalize_ocr_amount(raw_data.get("discount_amount")) or 0.0
-    ocr_grand_total = _normalize_ocr_amount(raw_data.get("total_amount")) or 0.0
-
-    # 3. Subtotal Validation
-    # If the calculated sum of line items disagrees with the OCR subtotal, we trust our math.
-    if calculated_subtotal > 0 and ocr_subtotal != calculated_subtotal:
-        logs.append(f"Subtotal Override: OCR {ocr_subtotal} replaced by Line Items Sum {calculated_subtotal}")
-        confidence_score -= 0.1
+    # 3. Validate Subtotal
+    final_subtotal = ocr_subtotal
+    if len(validated_line_items) > 0 and abs(ocr_subtotal - calculated_subtotal) > 0.01:
+        deduct_confidence(0.15, f"Subtotal Override: OCR {ocr_subtotal} replaced by Line Items Sum {calculated_subtotal}")
         final_subtotal = calculated_subtotal
-    else:
-        # If there were no line items extracted, we are forced to trust the OCR subtotal
-        final_subtotal = ocr_subtotal
 
-    # 4. Grand Total Calculation
-    # total = subtotal + tax - discount
-    math_grand_total = round(final_subtotal + ocr_tax - ocr_discount, 2)
+    # 4. Validate Grand Total (0.01 Tolerance)
+    misc_charges = shipping_charges + packing_charges + handling_charges + insurance_charges + other_charges
+    calculated_grand_total = round(final_subtotal + tax_amount - discount_amount + misc_charges + round_off, 2)
     
-    if ocr_grand_total != math_grand_total:
-        logs.append(f"Grand Total Override: OCR {ocr_grand_total} replaced by Math {math_grand_total} ({final_subtotal} + {ocr_tax} - {ocr_discount})")
-        confidence_score -= 0.1
-        final_grand_total = math_grand_total
+    final_total = ocr_grand_total
+    
+    # Check if the extracted OCR total matches our math (with 0.01 tolerance)
+    if abs(ocr_grand_total - calculated_grand_total) <= 0.01:
+        # Trust the printed invoice total
+        if ocr_grand_total > 0:
+            validation_logs.append(f"Printed total {ocr_grand_total} matched calculated total {calculated_grand_total} (Accepted)")
+        final_total = ocr_grand_total
     else:
-        final_grand_total = ocr_grand_total
-
-    # Bound confidence score
-    confidence_score = max(0.0, min(1.0, confidence_score))
+        # Complete mismatch. Math is wrong or OCR missed something entirely.
+        deduct_confidence(0.25, f"Grand Total Override: Printed {ocr_grand_total} replaced by Math {calculated_grand_total} (Subtotal {final_subtotal} + Tax {tax_amount} + Misc {misc_charges} + RoundOff {round_off} - Discount {discount_amount})")
+        final_total = calculated_grand_total
 
     return Invoice(
-        invoice_number=raw_data.get("invoice_number") or None,
-        vendor_name=raw_data.get("vendor_name") or None,
-        invoice_date=_parse_date(raw_data.get("invoice_date")),
-        gst_number=raw_data.get("gst_number") or None,
+        invoice_number=raw_data.get("invoice_number", ""),
+        vendor_name=raw_data.get("vendor_name", ""),
+        invoice_date=_parse_date(raw_data.get("invoice_date", "")),
+        gst_number=raw_data.get("gst_number", ""),
         subtotal=final_subtotal,
-        tax_amount=ocr_tax,
-        discount_amount=ocr_discount,
-        total_amount=final_grand_total,
+        tax_amount=tax_amount,
+        discount_amount=discount_amount,
+        shipping_charges=shipping_charges,
+        packing_charges=packing_charges,
+        handling_charges=handling_charges,
+        insurance_charges=insurance_charges,
+        other_charges=other_charges,
+        round_off=round_off,
+        total_amount=final_total,
         file_name=file_name,
         line_items=validated_line_items,
-        confidence_score=round(confidence_score, 2),
-        validation_logs=logs,
+        confidence_score=round(max(0.0, confidence_score), 2),
+        validation_logs=validation_logs,
         processing_time=datetime.now(),
     )

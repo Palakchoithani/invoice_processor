@@ -919,7 +919,7 @@
             <thead>
               <tr>
                 <th>Invoice #</th><th>Vendor</th><th>Date</th><th>GST</th>
-                <th>Subtotal</th><th>Tax</th><th>Discount</th><th>Total</th><th>File</th>
+                <th>Subtotal</th><th>Tax</th><th>Discount</th><th>Misc Charges</th><th>Total</th><th>File</th>
               </tr>
             </thead>
             <tbody id="recentBody">
@@ -976,7 +976,7 @@
             <thead>
               <tr>
                 <th>#</th><th>Invoice #</th><th>Vendor</th><th>Date</th><th>GST</th>
-                <th>Subtotal</th><th>Tax</th><th>Discount</th><th>Total</th><th>File</th>
+                <th>Subtotal</th><th>Tax</th><th>Discount</th><th>Misc Charges</th><th>Total</th><th>File</th>
               </tr>
             </thead>
             <tbody id="invoiceBody">
@@ -1417,6 +1417,14 @@
     }
 
     function invoiceRow(r, showId) {
+      const sCharge = r.shipping_charges || 0;
+      const pCharge = r.packing_charges || 0;
+      const hCharge = r.handling_charges || 0;
+      const iCharge = r.insurance_charges || 0;
+      const oCharge = r.other_charges || 0;
+      const roundOff = r.round_off || 0;
+      const miscSum = sCharge + pCharge + hCharge + iCharge + oCharge + roundOff;
+
       let html = `
         <tr>
           ${showId ? `<td style="color:var(--muted)">${escapeHTML(r.id)}</td>` : ''}
@@ -1427,11 +1435,41 @@
           <td>${fmtCurrency(r.subtotal)}</td>
           <td>${fmtCurrency(r.tax_amount)}</td>
           <td style="color:var(--warn);">${fmtCurrency(r.discount_amount || 0)}</td>
+          <td style="color:var(--muted);">${fmtCurrency(miscSum)}</td>
           <td style="font-weight:700; color:var(--success);">${fmtCurrency(r.total_amount)}</td>
           <td style="font-size:0.75rem; color:var(--muted);">${escapeHTML(r.file_name || '—')}</td>
         </tr>`;
       
       let detailsHtml = '';
+      
+      if (miscSum !== 0 || r.validation_logs?.length > 0) {
+        detailsHtml += `<div style="display:flex; gap:16px; margin-bottom:8px;">`;
+        
+        if (miscSum !== 0) {
+          detailsHtml += `<div style="flex:1; background:var(--bg-soft); padding:8px 12px; border-radius:4px; border:1px solid var(--border); font-size:0.8rem;">
+              <strong>Miscellaneous Charges Breakdown:</strong>
+              <ul style="margin:4px 0 0 16px; padding:0;">
+                ${sCharge ? `<li>Shipping: ${fmtCurrency(sCharge)}</li>` : ''}
+                ${pCharge ? `<li>Packing: ${fmtCurrency(pCharge)}</li>` : ''}
+                ${hCharge ? `<li>Handling: ${fmtCurrency(hCharge)}</li>` : ''}
+                ${iCharge ? `<li>Insurance: ${fmtCurrency(iCharge)}</li>` : ''}
+                ${oCharge ? `<li>Other: ${fmtCurrency(oCharge)}</li>` : ''}
+                ${roundOff ? `<li>Round-off: ${fmtCurrency(roundOff)}</li>` : ''}
+              </ul>
+            </div>`;
+        }
+        
+        if (r.validation_logs && r.validation_logs.length > 0) {
+          detailsHtml += `<div style="flex:1; background:var(--bg-soft); color:var(--muted); padding:8px 12px; border-radius:4px; border:1px solid var(--border); font-size:0.8rem;">
+              <strong>Math Validation Logs:</strong>
+              <ul style="margin:4px 0 0 16px; padding:0;">
+                ${r.validation_logs.map(log => `<li>${escapeHTML(log)}</li>`).join('')}
+              </ul>
+            </div>`;
+        }
+        
+        detailsHtml += `</div>`;
+      }
       
       if (r.line_items && r.line_items.length > 0) {
         detailsHtml += `<table style="width:100%; font-size:0.8rem; background:var(--bg-soft); border-radius:6px; margin:4px 0; border: 1px solid var(--border);">
@@ -1458,7 +1496,7 @@
       }
       
       if (detailsHtml) {
-        const colspan = showId ? 10 : 9;
+        const colspan = showId ? 11 : 10;
         html += `<tr><td colspan="${colspan}" style="padding: 0 16px 16px 16px; border-bottom: 2px solid var(--border);">${detailsHtml}</td></tr>`;
       }
       return html;

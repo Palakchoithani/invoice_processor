@@ -17,60 +17,87 @@ def test_normalization():
     print("✓ Normalization passed")
 
 def test_arithmetic_engine():
-    print("\nTesting Arithmetic Engine...")
+    print("\nTesting Arithmetic Engine (Override)...")
     
-    # Simulating a hallucinated LLM response based on messy OCR
     malformed_raw_data = {
         "invoice_number": "INV-001",
-        "subtotal": 10000.0,  # Hallucinated wrong subtotal
+        "subtotal": 10000.0,
         "tax_amount": 500.0,
-        "discount_amount": "l00,00", # OCR typo: l instead of 1, comma instead of dot
+        "discount_amount": "l00,00",
+        "shipping_charges": 50.0,
         "total_amount": 99999.0, # Completely wrong total
         "line_items": [
             {
                 "description": "Item 1",
-                "quantity": "O.5", # Typos
+                "quantity": "O.5",
                 "unit_price": "l,000.00",
-                "total": "50000" # OCR read extra zeros
+                "total": "50000"
             },
             {
                 "description": "Item 2",
                 "quantity": 2,
                 "unit_price": 200.0,
-                "total": 400.0 # Correctly OCR'd
+                "total": 400.0
             }
         ]
     }
 
     invoice = parse_invoice(malformed_raw_data, "test.pdf")
     
-    # Verify Item 1 Math: 0.5 * 1000 = 500
-    assert invoice.line_items[0]["total"] == 500.0, f"Expected 500.0, got {invoice.line_items[0]['total']}"
-    
-    # Verify Item 2 Math: 2 * 200 = 400
+    # Verify Math
+    assert invoice.line_items[0]["total"] == 500.0
     assert invoice.line_items[1]["total"] == 400.0
-    
-    # Verify Subtotal: 500 + 400 = 900
-    assert invoice.subtotal == 900.0, f"Expected 900.0, got {invoice.subtotal}"
-    
-    # Verify Discount parsed correctly: "l00,00" -> 100.00
+    assert invoice.subtotal == 900.0
     assert invoice.discount_amount == 100.0
+    assert invoice.shipping_charges == 50.0
     
-    # Verify Tax
-    assert invoice.tax_amount == 500.0
+    # Verify Grand Total: Subtotal (900) + Tax (500) - Discount (100) + Shipping (50) = 1350
+    assert invoice.total_amount == 1350.0, f"Expected 1350.0, got {invoice.total_amount}"
     
-    # Verify Grand Total: Subtotal (900) + Tax (500) - Discount (100) = 1300
-    assert invoice.total_amount == 1300.0, f"Expected 1300.0, got {invoice.total_amount}"
+    # Ensure it generated override logs
+    assert any("Override" in log for log in invoice.validation_logs)
+    print("✓ Arithmetic Engine (Override) passed")
+
+def test_tolerance_and_charges():
+    print("\nTesting Tolerance & Extra Charges (Acceptance)...")
     
-    # Verify validation logs
-    assert len(invoice.validation_logs) > 0
-    print("Validation Logs generated:")
-    for log in invoice.validation_logs:
-        print(f"  - {log}")
-        
-    print("✓ Arithmetic Engine passed")
+    # Simulating a completely correct invoice that has floating point imprecision
+    # and utilizes all 6 new charges
+    perfect_raw_data = {
+        "invoice_number": "INV-002",
+        "subtotal": 100.0,
+        "tax_amount": 5.0,
+        "discount_amount": 10.0,
+        "shipping_charges": 20.0,
+        "packing_charges": 5.0,
+        "handling_charges": 2.50,
+        "insurance_charges": 10.0,
+        "other_charges": 1.0,
+        "round_off": -0.50,
+        "total_amount": 133.0, # Math: 100 + 5 - 10 + (20 + 5 + 2.5 + 10 + 1) - 0.5 = 133.0
+        "line_items": [
+            {
+                "description": "Item 1",
+                "quantity": 1,
+                "unit_price": 100.0,
+                "total": 100.0
+            }
+        ]
+    }
+    
+    # Introduce floating point noise to OCR total (e.g. 133.004) -> it should still accept 133.004 because it's within 0.01 
+    # Actually wait, let's say the printed total is 133.01, our math says 133.0. It should accept 133.01.
+    perfect_raw_data["total_amount"] = 133.01
+    
+    invoice = parse_invoice(perfect_raw_data, "test2.pdf")
+    
+    # Verify it accepted the PRINTED total because difference is exactly 0.01
+    assert invoice.total_amount == 133.01, f"Expected 133.01, got {invoice.total_amount}"
+    assert any("Accepted" in log for log in invoice.validation_logs)
+    print("✓ Tolerance & Extra Charges passed")
 
 if __name__ == "__main__":
     test_normalization()
     test_arithmetic_engine()
+    test_tolerance_and_charges()
     print("\nAll Tests Passed Successfully! 🚀")

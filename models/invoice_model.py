@@ -12,6 +12,12 @@ class Invoice:
     subtotal: Optional[float] = None
     tax_amount: Optional[float] = None
     discount_amount: Optional[float] = None
+    shipping_charges: Optional[float] = None
+    packing_charges: Optional[float] = None
+    handling_charges: Optional[float] = None
+    insurance_charges: Optional[float] = None
+    other_charges: Optional[float] = None
+    round_off: Optional[float] = None
     total_amount: Optional[float] = None
     file_name: Optional[str] = None
     line_items: Optional[List[Dict[str, Any]]] = field(default_factory=list)
@@ -28,6 +34,12 @@ class Invoice:
             "subtotal": self.subtotal,
             "tax_amount": self.tax_amount,
             "discount_amount": self.discount_amount,
+            "shipping_charges": self.shipping_charges,
+            "packing_charges": self.packing_charges,
+            "handling_charges": self.handling_charges,
+            "insurance_charges": self.insurance_charges,
+            "other_charges": self.other_charges,
+            "round_off": self.round_off,
             "total_amount": self.total_amount,
             "file_name": self.file_name,
             "line_items": self.line_items,
