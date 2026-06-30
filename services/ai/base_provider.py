@@ -30,7 +30,7 @@ Instructions:
 1. invoice_number: The unique identifier for the invoice (e.g. invoice #, bill no). Look for slashes or dashes.
 2. vendor_name: The company or person who issued the invoice. Usually at the top.
 3. invoice_date: The date the invoice was issued, formatted as YYYY-MM-DD.
-4. gst_number: The GSTIN or tax identification number.
+4. gst_number: The GSTIN or tax identification number. If it is not present, return a blank string "".
 5. subtotal: The amount before taxes. Do not include currency symbols, just the number. 
 6. tax_amount: The total tax applied (GST/VAT). Do not include currency symbols. If multiple taxes exist, sum them up.
 7. total_amount: The final total amount to be paid. Do not include currency symbols. 
