@@ -1417,13 +1417,10 @@
     }
 
     function invoiceRow(r, showId) {
-      const confColor = r.confidence_score >= 1.0 ? 'var(--success)' : r.confidence_score >= 0.8 ? 'var(--warn)' : 'var(--danger)';
-      const confBadge = `<span style="font-size:0.7rem; padding:2px 6px; border-radius:4px; background:${confColor}22; color:${confColor}; border:1px solid ${confColor}44; margin-left:8px;" title="Extraction Confidence Score">${Math.round(r.confidence_score * 100)}% Confidence</span>`;
-      
       let html = `
         <tr>
           ${showId ? `<td style="color:var(--muted)">${escapeHTML(r.id)}</td>` : ''}
-          <td style="font-weight:700; color:var(--navy);">${escapeHTML(r.invoice_number || '—')} ${confBadge}</td>
+          <td style="font-weight:700; color:var(--navy);">${escapeHTML(r.invoice_number || '—')}</td>
           <td>${escapeHTML(r.vendor_name || '—')}</td>
           <td>${escapeHTML(r.invoice_date || '—')}</td>
           <td><code>${escapeHTML(r.gst_number || '—')}</code></td>
