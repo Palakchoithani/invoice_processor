@@ -60,9 +60,12 @@ def save_invoice(invoice: Invoice) -> str:
         "gst_number": invoice.gst_number,
         "subtotal": float(invoice.subtotal) if invoice.subtotal else 0.0,
         "tax_amount": float(invoice.tax_amount) if invoice.tax_amount else 0.0,
+        "discount_amount": float(invoice.discount_amount) if invoice.discount_amount else 0.0,
         "total_amount": float(invoice.total_amount) if invoice.total_amount else 0.0,
         "file_name": invoice.file_name,
         "line_items": invoice.line_items or [],
+        "confidence_score": float(invoice.confidence_score),
+        "validation_logs": invoice.validation_logs or [],
         "processing_time": invoice.processing_time.isoformat() if invoice.processing_time else datetime.now().isoformat(),
         "created_at": datetime.now().isoformat()
     }

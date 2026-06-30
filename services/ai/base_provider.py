@@ -15,6 +15,7 @@ Required JSON format:
   "gst_number": "string",
   "subtotal": float,
   "tax_amount": float,
+  "discount_amount": float,
   "total_amount": float,
   "line_items": [
     {
@@ -27,20 +28,21 @@ Required JSON format:
 }
 
 Instructions:
-1. invoice_number: The unique identifier for the invoice (e.g. invoice #, bill no). Look for slashes or dashes.
-2. vendor_name: The company or person who issued the invoice. Usually at the top.
-3. invoice_date: The date the invoice was issued, formatted as DD-MM-YYYY.
-4. gst_number: The GSTIN or tax identification number. If it is not present, return a blank string "".
-5. subtotal: The amount before taxes. Do not include currency symbols, just the number. 
-6. tax_amount: The total tax applied (GST/VAT). Do not include currency symbols. If multiple taxes exist, sum them up.
-7. total_amount: The final total amount to be paid. Do not include currency symbols. 
-8. line_items: Extract all individual items purchased or billed on the invoice. Include the description, quantity, price per unit, and the total line price.
+1. Extract numbers EXACTLY as written on the document. Do not invent values or perform arithmetic.
+2. invoice_number: The unique identifier for the invoice (e.g. invoice #, bill no). Look for slashes or dashes.
+3. vendor_name: The company or person who issued the invoice. Usually at the top.
+4. invoice_date: The date the invoice was issued, formatted as DD-MM-YYYY.
+5. gst_number: The GSTIN or tax identification number. If it is not present, return a blank string "".
+6. subtotal: The amount before taxes and discounts. Do not include currency symbols.
+7. tax_amount: The total tax applied (GST/VAT). Do not include currency symbols. If multiple taxes exist, sum them up.
+8. discount_amount: The total discount applied. Do not include currency symbols.
+9. total_amount: The final total amount to be paid. Do not include currency symbols.
+10. line_items: Extract all individual items purchased or billed on the invoice. Include the description, quantity, price per unit, and the total line price.
 
-CRITICAL MATH VERIFICATION:
-- Double-check your numbers. The `subtotal` + `tax_amount` MUST mathematically equal the `total_amount`.
-- If the OCR text is messy, use logic to deduce the correct amounts (e.g., if tax is 10%, subtotal is 100, then total must be 110).
-- For each line item, `quantity` * `unit_price` MUST equal the line `total`.
-- The sum of all line item `total`s MUST equal the `subtotal`. Fix any OCR typos that violate this math.
+CRITICAL OCR RULES:
+- NEVER perform math to guess missing values.
+- DO NOT strip commas or decimal points if present in the raw text.
+- Return exactly what you see. If a field is missing, return null.
 
 INVOICE TEXT:
 """

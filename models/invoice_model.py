@@ -11,9 +11,12 @@ class Invoice:
     gst_number: Optional[str] = None
     subtotal: Optional[float] = None
     tax_amount: Optional[float] = None
+    discount_amount: Optional[float] = None
     total_amount: Optional[float] = None
     file_name: Optional[str] = None
     line_items: Optional[List[Dict[str, Any]]] = field(default_factory=list)
+    confidence_score: float = 1.0
+    validation_logs: List[str] = field(default_factory=list)
     processing_time: Optional[datetime] = None
 
     def to_dict(self):
@@ -24,9 +27,12 @@ class Invoice:
             "gst_number": self.gst_number,
             "subtotal": self.subtotal,
             "tax_amount": self.tax_amount,
+            "discount_amount": self.discount_amount,
             "total_amount": self.total_amount,
             "file_name": self.file_name,
             "line_items": self.line_items,
+            "confidence_score": self.confidence_score,
+            "validation_logs": self.validation_logs,
             "processing_time": str(self.processing_time) if self.processing_time else None,
         }
 
