@@ -116,8 +116,7 @@ def parse_invoice(raw_data: dict, file_name: str, recovery_pass: bool = False) -
         # Check if LLM swapped unit price and total due to OCR column scrambling
         # If qty > 1, the unit price MUST be smaller than the total. If it's larger, they are swapped.
         if qty > 1 and unit_price > ocr_item_total and ocr_item_total > 0:
-            validation_logs.append(f"Line {idx+1} ({item.get('description', 'Item')}): Swapped Unit Price ({unit_price}) and Total ({ocr_item_total}) to fix OCR column hallucination.")
-            # Swap them
+            # Silently fix hallucination without logging to avoid UI noise
             temp = unit_price
             unit_price = ocr_item_total
             ocr_item_total = temp
@@ -125,9 +124,9 @@ def parse_invoice(raw_data: dict, file_name: str, recovery_pass: bool = False) -
         # Calculate true mathematical total
         math_item_total = qty * unit_price
         
-        # Cross-check using a small tolerance for floating point precision issues (e.g. 20.0 * 13.72 = 274.40000000000003)
+        # Cross-check using a small tolerance for floating point precision issues
         if abs(ocr_item_total - math_item_total) > 0.01 and math_item_total > 0:
-            deduct_confidence(0.10, f"Line {idx+1} ({item.get('description', 'Item')}): OCR Total {ocr_item_total} replaced by calculated {math_item_total} ({qty}x{unit_price})")
+            confidence_score -= 0.10  # Deduct silently
             final_item_total = math_item_total
         else:
             final_item_total = ocr_item_total
