@@ -20,7 +20,7 @@ class Invoice:
         return {
             "invoice_number": self.invoice_number,
             "vendor_name": self.vendor_name,
-            "invoice_date": str(self.invoice_date) if self.invoice_date else None,
+            "invoice_date": self.invoice_date.strftime("%d-%m-%Y") if self.invoice_date else None,
             "gst_number": self.gst_number,
             "subtotal": self.subtotal,
             "tax_amount": self.tax_amount,
