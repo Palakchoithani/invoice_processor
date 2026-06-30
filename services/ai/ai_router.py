@@ -42,6 +42,7 @@ class AIRouter:
             raise ValueError("Empty invoice text provided to Router.")
             
         failed_results = []
+        provider_errors = {}
         
         for provider_name in self.priority:
             if provider_name not in self.providers:
@@ -77,12 +78,14 @@ class AIRouter:
                 
             except Exception as e:
                 log_warning(f"{provider_name.capitalize()} API failed: {e}")
+                provider_errors[provider_name] = str(e)
                 continue
                 
         # If we reach here, ALL providers either API-failed or Math-failed.
         if not failed_results:
             log_error("All available AI providers failed completely.")
-            raise RuntimeError("AI extraction failed: All providers exhausted or unavailable.")
+            error_details = ", ".join([f"{k}: {v}" for k, v in provider_errors.items()])
+            raise RuntimeError(f"AI extraction failed: All providers exhausted or unavailable. Details: {error_details}")
             
         if len(failed_results) == 1:
             log_info("Only one provider succeeded (but failed math). Returning it for OCR Recovery.")
