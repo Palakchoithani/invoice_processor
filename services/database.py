@@ -167,6 +167,7 @@ def get_stats() -> Dict[str, Any]:
     failed = 0
     processing = 0
     pending = 0
+    duplicates = 0
     grand_total = 0.0
     
     for doc in docs:
@@ -177,6 +178,8 @@ def get_stats() -> Dict[str, Any]:
             grand_total += float(data.get("total_amount") or 0.0)
         elif st == "FAILED":
             failed += 1
+        elif st == "DUPLICATE":
+            duplicates += 1
         elif st == "PROCESSING":
             processing += 1
         elif st == "PENDING":
@@ -188,6 +191,7 @@ def get_stats() -> Dict[str, Any]:
         "processing_summary": {
             "SUCCESS": processed,
             "FAILED": failed,
+            "DUPLICATE": duplicates,
             "PROCESSING": processing,
             "PENDING": pending
         }

@@ -1026,7 +1026,12 @@
         <div class="stat-card">
           <div class="stat-top"><span class="label">Failed Invoices</span><span class="stat-icon">!</span></div>
           <div class="value" id="statFailed">—</div>
-          <div class="hint">Extraction errors or duplicates</div>
+          <div class="hint">Extraction errors</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-top"><span class="label">Duplicate Invoices</span><span class="stat-icon">📄</span></div>
+          <div class="value" id="statDuplicates">—</div>
+          <div class="hint">Identified duplicates</div>
         </div>
         <div class="stat-card">
           <div class="stat-top"><span class="label">Processing</span><span class="stat-icon">⚙</span></div>
@@ -1518,6 +1523,7 @@
         const ps = d.processing_summary || {};
         const processed = Number(ps.SUCCESS ?? 0);
         const failed = Number(ps.FAILED ?? 0);
+        const duplicates = Number(ps.DUPLICATE ?? 0);
         const processing = Number(ps.PROCESSING ?? 0);
         const pending = Number(ps.PENDING ?? 0);
         const total = Number(d.total_invoices ?? 0);
@@ -1525,6 +1531,7 @@
         document.getElementById('statTotal').textContent = total.toLocaleString('en-IN');
         document.getElementById('statProcessed').textContent = processed.toLocaleString('en-IN');
         if(document.getElementById('statFailed')) document.getElementById('statFailed').textContent = failed.toLocaleString('en-IN');
+        if(document.getElementById('statDuplicates')) document.getElementById('statDuplicates').textContent = duplicates.toLocaleString('en-IN');
         if(document.getElementById('statProcessing')) document.getElementById('statProcessing').textContent = processing.toLocaleString('en-IN');
         document.getElementById('statPending').textContent = pending.toLocaleString('en-IN');
         document.getElementById('statMonthly').textContent = fmtCurrency(d.grand_total_amount || 0);
@@ -1534,7 +1541,7 @@
         document.getElementById('heroProcessed').textContent = processed.toLocaleString('en-IN');
         document.getElementById('heroVolume').textContent = fmtCurrency(d.grand_total_amount || 0);
 
-        renderStatusChart(processed, failed, pending + processing);
+        renderStatusChart(processed, failed, duplicates);
       } catch (e) {
         console.error('Stats unavailable', e);
       }

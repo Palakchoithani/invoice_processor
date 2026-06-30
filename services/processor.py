@@ -117,13 +117,13 @@ def process_single_invoice(file_path: str) -> dict:
         create_or_update_job(DocumentJob(
             file_hash=file_hash,
             file_name=file_name,
-            status="FAILED",  # Marking as FAILED so it's not double counted, but we'll show duplicate message
+            status="DUPLICATE",
             error_message=msg
         ))
-        move_to_failed(processing_path)
+        move_to_processed(processing_path)
         return {
             "file": file_name,
-            "status": "FAILED",
+            "status": "DUPLICATE",
             "detail": msg,
         }
 
