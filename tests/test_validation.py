@@ -25,7 +25,7 @@ def test_arithmetic_engine():
         "tax_amount": 500.0,
         "discount_amount": "l00,00",
         "shipping_charges": 50.0,
-        "total_amount": 99999.0, # Completely wrong total
+        "total_amount": 1351.0, # Small discrepancy that should be overridden silently
         "line_items": [
             {
                 "description": "Item 1",
@@ -96,8 +96,35 @@ def test_tolerance_and_charges():
     assert any("Accepted" in log for log in invoice.validation_logs)
     print("✓ Tolerance & Extra Charges passed")
 
+def test_massive_hallucination():
+    print("\nTesting Massive Hallucination Rejection...")
+    malformed_raw_data = {
+        "invoice_number": "INV-001",
+        "subtotal": 1000.0,
+        "total_amount": 344650.0, # Completely wrong total (Zip code hallucination)
+        "line_items": [
+            {
+                "description": "Item 1",
+                "quantity": 1,
+                "unit_price": 1000.0,
+                "total": 1000.0
+            }
+        ]
+    }
+    
+    # Mathematical total is 1000. Printed total is 344650. Difference is 343650.
+    # Threshold is 10% of 1000 = 100.
+    # Difference (343650) > Threshold (100) -> Should raise ValueError
+    try:
+        parse_invoice(malformed_raw_data, "test.pdf")
+        assert False, "Should have raised ValueError for massive discrepancy"
+    except ValueError as e:
+        assert "Massive Discrepancy Detected" in str(e)
+        print("✓ Massive Hallucination properly rejected")
+
 if __name__ == "__main__":
     test_normalization()
     test_arithmetic_engine()
     test_tolerance_and_charges()
+    test_massive_hallucination()
     print("\nAll Tests Passed Successfully! 🚀")

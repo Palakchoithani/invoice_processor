@@ -52,9 +52,11 @@ Instructions:
 16. line_items: Extract all individual items purchased or billed on the invoice. Include the description, quantity, price per unit, and the total line price.
 
 CRITICAL OCR RULES:
+- IGNORE NON-FINANCIAL NUMBERS: Do NOT extract Product IDs, SKU numbers, Part numbers, Item codes, Phone numbers, Serial numbers, PIN codes, ZIP codes, or PO numbers as monetary values.
+- DETECT MONEY CORRECTLY: Only extract a number as a monetary field if it is explicitly associated with a currency symbol, an amount column, or labeled as Total/Subtotal/Tax.
 - NEVER perform math to guess missing values. Search the entire invoice (headers, footers, summary sections) for these fields.
 - DO NOT strip commas or decimal points if present in the raw text.
-- Return exactly what you see. If a field is missing, return null.
+- Return exactly what you see. If a field is missing or not explicitly a monetary value, return null.
 
 INVOICE TEXT:
 """

@@ -146,6 +146,15 @@ def parse_invoice(raw_data: dict, file_name: str) -> Invoice:
         final_total = ocr_grand_total
     else:
         # Complete mismatch. Math is wrong or OCR missed something entirely.
+        difference = abs(ocr_grand_total - calculated_grand_total)
+        
+        # Hardware-fail if the difference is massive (e.g. LLM read a ZIP code as the total)
+        # Threshold: 10% of the calculated total, or at least a minimum $5 margin to avoid dividing by zero or failing small subtotals
+        threshold = max(calculated_grand_total * 0.10, 5.0)
+        
+        if ocr_grand_total > 0 and difference > threshold:
+            raise ValueError(f"Massive Discrepancy Detected: The extracted printed total ({ocr_grand_total}) completely mismatches the calculated mathematical total ({calculated_grand_total}). This indicates a severe hallucination or missing fields. Extraction blocked.")
+            
         deduct_confidence(0.25, f"Grand Total Override: Printed {ocr_grand_total} replaced by Math {calculated_grand_total} (Subtotal {final_subtotal} + Tax {tax_amount} + Misc {misc_charges} + RoundOff {round_off} - Discount {discount_amount})")
         final_total = calculated_grand_total
 
