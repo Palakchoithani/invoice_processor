@@ -56,3 +56,27 @@ class ProcessingLog:
     file_name: str
     status: str  # SUCCESS | FAILED | DUPLICATE | SKIPPED
     error_message: Optional[str] = None
+
+
+@dataclass
+class DocumentJob:
+    file_hash: str
+    file_name: str
+    status: str  # PENDING | PROCESSING | PROCESSED | FAILED
+    invoice_id: Optional[str] = None
+    total_amount: Optional[float] = None
+    error_message: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    def to_dict(self):
+        return {
+            "file_hash": self.file_hash,
+            "file_name": self.file_name,
+            "status": self.status,
+            "invoice_id": self.invoice_id,
+            "total_amount": self.total_amount,
+            "error_message": self.error_message,
+            "created_at": self.created_at.isoformat() if self.created_at else datetime.now().isoformat(),
+            "updated_at": self.updated_at.isoformat() if self.updated_at else datetime.now().isoformat(),
+        }

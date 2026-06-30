@@ -8,7 +8,8 @@ FIREBASE_KEY_PATH = os.getenv("FIREBASE_KEY_PATH", "firebase-key.json")
 # Vercel Serverless compatibility: use /tmp
 BASE_DIR = os.getenv("TMPDIR", "/tmp")
 
-INVOICES_DIR = os.path.join(BASE_DIR, "invoices")
+PENDING_DIR = os.path.join(BASE_DIR, "pending")
+PROCESSING_DIR = os.path.join(BASE_DIR, "processing")
 FAILED_DIR = os.path.join(BASE_DIR, "failed")
 PROCESSED_DIR = os.path.join(BASE_DIR, "processed")
 

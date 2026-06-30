@@ -1,6 +1,6 @@
-
 import time
 from pathlib import Path
+from datetime import datetime
 
 from services.ocr_service import extract_invoice_data
 from services.parser import parse_invoice
@@ -8,12 +8,15 @@ from services.validator import validate_invoice
 from services.database import (
     check_duplicate,
     save_invoice,
-    write_log,
+    get_job_by_hash,
+    create_or_update_job
 )
 
 from services.file_handler import (
     move_to_processed,
     move_to_failed,
+    move_to_processing,
+    calculate_file_hash
 )
 
 from services.logger import (
@@ -22,44 +25,58 @@ from services.logger import (
     log_warning,
 )
 
-from models.invoice_model import ProcessingLog
+from models.invoice_model import DocumentJob
 
 
 def process_single_invoice(file_path: str) -> dict:
     """
     Complete processing pipeline for a single invoice.
     """
+    if not Path(file_path).exists():
+        return {"status": "FAILED", "detail": "File not found"}
 
     file_name = Path(file_path).name
+    file_hash = calculate_file_hash(file_path)
 
-    log_info(f"Processing invoice: {file_name}")
-
-    # --------------------------------------------------
-    # 1. Extract invoice data
-    # --------------------------------------------------
-    try:
-        raw_data, invoice_text = extract_invoice_data(file_path)
-
-    except Exception as e:
-        msg = f"Extraction failed: {e}"
-        log_error(msg)
-        write_log(
-            ProcessingLog(
-                file_name=file_name,
-                status="FAILED",
-                error_message=msg,
-            )
-        )
-        move_to_failed(file_path)
+    # 1. Hash Duplicate Prevention
+    existing_job = get_job_by_hash(file_hash)
+    if existing_job and existing_job.get("status") == "PROCESSED":
+        msg = "Duplicate file upload (hash matched)."
+        log_warning(f"{msg} File: {file_name}")
         return {
             "file": file_name,
-            "status": "FAILED",
+            "status": "DUPLICATE",
             "detail": msg,
         }
 
-    # --------------------------------------------------
-    # 2. Parse invoice & Handle Mismatch Recovery
-    # --------------------------------------------------
+    # 2. Set to PROCESSING
+    create_or_update_job(DocumentJob(
+        file_hash=file_hash,
+        file_name=file_name,
+        status="PROCESSING"
+    ))
+    processing_path = move_to_processing(file_path)
+
+    log_info(f"Processing invoice: {file_name}")
+
+    def fail_job(msg: str):
+        log_error(msg)
+        create_or_update_job(DocumentJob(
+            file_hash=file_hash,
+            file_name=file_name,
+            status="FAILED",
+            error_message=msg
+        ))
+        move_to_failed(processing_path)
+        return {"file": file_name, "status": "FAILED", "detail": msg}
+
+    # 3. Extract invoice data
+    try:
+        raw_data, invoice_text = extract_invoice_data(processing_path)
+    except Exception as e:
+        return fail_job(f"Extraction failed: {e}")
+
+    # 4. Parse invoice & Handle Mismatch Recovery
     try:
         from services.parser import MismatchException
         from services.ocr_service import ai_router
@@ -67,126 +84,61 @@ def process_single_invoice(file_path: str) -> dict:
             invoice = parse_invoice(raw_data, file_name)
         except MismatchException as mismatch:
             log_warning(f"Math Mismatch Detected: {mismatch}. Triggering OCR Recovery Pass...")
-            # Trigger secondary recovery pass
             recovered_data = ai_router.recover_missing_charges(
                 invoice_text=invoice_text,
                 printed_total=mismatch.printed_total,
                 calculated_total=mismatch.calculated_total,
                 gap=mismatch.gap
             )
-            
-            # Merge the recovered fields into raw_data
             for key in ["shipping_charges", "packing_charges", "handling_charges", "insurance_charges", "tax_amount", "discount_amount", "other_charges", "round_off"]:
                 if recovered_data.get(key) is not None:
                     raw_data[key] = recovered_data[key]
-                    
             if "extraction_logs" in recovered_data and recovered_data["extraction_logs"]:
                 if "extraction_logs" not in raw_data:
                     raw_data["extraction_logs"] = []
                 raw_data["extraction_logs"].extend(recovered_data["extraction_logs"])
                 
-            # Reparse with the new merged data.
-            # If it STILL fails math, we just let it fail or accept it depending on threshold.
-            # We want it to throw ValueError if threshold is exceeded this time.
             invoice = parse_invoice(raw_data, file_name, recovery_pass=True)
-            
-            # Deduct confidence for requiring a second pass
             invoice.confidence_score = round(max(0.0, invoice.confidence_score - 0.20), 2)
             invoice.validation_logs.append("OCR Recovery Pass Successfully Bridged Gap")
 
     except Exception as e:
-        msg = f"Parsing failed: {e}"
-        log_error(msg)
-        write_log(
-            ProcessingLog(
-                file_name=file_name,
-                status="FAILED",
-                error_message=msg,
-            )
-        )
-        move_to_failed(file_path)
-        return {
-            "file": file_name,
-            "status": "FAILED",
-            "detail": msg,
-        }
+        return fail_job(f"Parsing failed: {e}")
 
-    # --------------------------------------------------
-    # 3. Validate invoice
-    # --------------------------------------------------
+    # 5. Validate invoice
     valid, reason = validate_invoice(invoice)
-
     if not valid:
+        return fail_job(reason)
 
-        log_warning(
-            f"Validation failed for {file_name}: {reason}"
-        )
-
-        write_log(
-            ProcessingLog(
-                file_name=file_name,
-                status="FAILED",
-                error_message=reason,
-            )
-        )
-
-        move_to_failed(file_path)
-
+    # 6. Invoice Number Duplicate Check (Logical Duplicate)
+    if check_duplicate(invoice.invoice_number):
+        msg = f"Duplicate invoice number: {invoice.invoice_number}"
+        log_warning(msg)
+        create_or_update_job(DocumentJob(
+            file_hash=file_hash,
+            file_name=file_name,
+            status="FAILED",  # Marking as FAILED so it's not double counted, but we'll show duplicate message
+            error_message=msg
+        ))
+        move_to_failed(processing_path)
         return {
             "file": file_name,
             "status": "FAILED",
-            "detail": reason,
-        }
-
-    # --------------------------------------------------
-    # 4. Duplicate check
-    # --------------------------------------------------
-    if check_duplicate(invoice.invoice_number):
-
-        msg = (
-            f"Duplicate invoice number: "
-            f"{invoice.invoice_number}"
-        )
-
-        log_warning(msg)
-
-        write_log(
-            ProcessingLog(
-                file_name=file_name,
-                status="DUPLICATE",
-                error_message=msg,
-            )
-        )
-
-        move_to_processed(file_path)
-
-        return {
-            "file": file_name,
-            "status": "DUPLICATE",
             "detail": msg,
         }
 
-    # --------------------------------------------------
-    # 5. Save invoice
-    # --------------------------------------------------
+    # 7. Save invoice
     try:
-
-        # Save to Firebase Firestore
         firestore_id = save_invoice(invoice)
-
-        write_log(
-            ProcessingLog(
-                file_name=file_name,
-                status="SUCCESS",
-            )
-        )
-
-        move_to_processed(file_path)
-
-        log_info(
-            f"Invoice saved. "
-            f"Firestore ID={firestore_id}"
-        )
+        create_or_update_job(DocumentJob(
+            file_hash=file_hash,
+            file_name=file_name,
+            status="PROCESSED",
+            invoice_id=firestore_id,
+            total_amount=invoice.total_amount
+        ))
+        move_to_processed(processing_path)
+        log_info(f"Invoice saved. Firestore ID={firestore_id}")
 
         return {
             "file": file_name,
@@ -195,29 +147,8 @@ def process_single_invoice(file_path: str) -> dict:
             "firestore_id": firestore_id,
             "invoice": invoice.to_dict(),
         }
-
     except Exception as e:
-
-        msg = f"Save failed: {e}"
-
-        log_error(msg)
-
-        write_log(
-            ProcessingLog(
-                file_name=file_name,
-                status="FAILED",
-                error_message=msg,
-            )
-        )
-
-        move_to_failed(file_path)
-
-        return {
-            "file": file_name,
-            "status": "FAILED",
-            "detail": msg,
-        }
-
+        return fail_job(f"Save failed: {e}")
 
 def process_all_invoices() -> list[dict]:
 

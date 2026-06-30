@@ -4,7 +4,7 @@ from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, firestore
 from config.db_config import FIREBASE_KEY_PATH
-from models.invoice_model import Invoice, ProcessingLog
+from models.invoice_model import Invoice, DocumentJob
 from services.logger import log_info, log_error
 
 _db = None
@@ -94,16 +94,20 @@ def save_invoice(invoice: Invoice) -> str:
     log_info(f"Saved invoice {invoice.invoice_number} (id={doc_ref.id})")
     return doc_ref.id
 
-def write_log(log: ProcessingLog):
-    """Insert a processing log record."""
+def get_job_by_hash(file_hash: str) -> Optional[Dict[str, Any]]:
     db = get_db()
-    data = {
-        "file_name": log.file_name,
-        "status": log.status,
-        "error_message": log.error_message,
-        "processed_at": datetime.now().isoformat()
-    }
-    db.collection("processing_logs").add(data)
+    doc = db.collection("document_jobs").document(file_hash).get()
+    if doc.exists:
+        return doc.to_dict()
+    return None
+
+def create_or_update_job(job: DocumentJob):
+    db = get_db()
+    data = job.to_dict()
+    # Remove None values so we don't overwrite with nulls unnecessarily if we are just updating status
+    update_data = {k: v for k, v in data.items() if v is not None}
+    db.collection("document_jobs").document(job.file_hash).set(update_data, merge=True)
+    log_info(f"Updated job {job.file_hash} to status {job.status}")
 
 def get_all_invoices() -> List[Dict[str, Any]]:
     db = get_db()
@@ -138,28 +142,53 @@ def search_invoices(query: str) -> List[Dict[str, Any]]:
     return results
 
 def get_all_logs() -> List[Dict[str, Any]]:
+    """Return all jobs for the dashboard recent logs list."""
     db = get_db()
-    docs = db.collection("processing_logs").order_by("processed_at", direction=firestore.Query.DESCENDING).limit(200).get()
-    return [{"id": doc.id, **doc.to_dict()} for doc in docs]
+    docs = db.collection("document_jobs").order_by("updated_at", direction=firestore.Query.DESCENDING).limit(200).get()
+    results = []
+    for doc in docs:
+        d = doc.to_dict()
+        results.append({
+            "id": doc.id,
+            "file_name": d.get("file_name"),
+            "status": d.get("status"),
+            "error_message": d.get("error_message"),
+            "processed_at": d.get("updated_at")
+        })
+    return results
 
 def get_stats() -> Dict[str, Any]:
     db = get_db()
     
-    # Calculate invoice stats
-    invoices = db.collection("invoices").get()
-    total_invoices = len(invoices)
-    grand_total = sum((doc.to_dict().get("total_amount") or 0.0) for doc in invoices)
+    docs = db.collection("document_jobs").get()
     
-    # Calculate log stats
-    logs = db.collection("processing_logs").get()
-    status_map = {}
-    for doc in logs:
-        st = doc.to_dict().get("status")
-        if st:
-            status_map[st] = status_map.get(st, 0) + 1
+    total_invoices = len(docs)
+    processed = 0
+    failed = 0
+    processing = 0
+    pending = 0
+    grand_total = 0.0
+    
+    for doc in docs:
+        data = doc.to_dict()
+        st = data.get("status")
+        if st == "PROCESSED":
+            processed += 1
+            grand_total += float(data.get("total_amount") or 0.0)
+        elif st == "FAILED":
+            failed += 1
+        elif st == "PROCESSING":
+            processing += 1
+        elif st == "PENDING":
+            pending += 1
             
     return {
         "total_invoices": total_invoices,
-        "grand_total_amount": float(grand_total),
-        "processing_summary": status_map,
+        "grand_total_amount": grand_total,
+        "processing_summary": {
+            "SUCCESS": processed,
+            "FAILED": failed,
+            "PROCESSING": processing,
+            "PENDING": pending
+        }
     }

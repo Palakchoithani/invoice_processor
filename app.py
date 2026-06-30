@@ -8,13 +8,14 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-from config.db_config import INVOICES_DIR, SUPPORTED_FORMATS
-from services.processor import process_single_invoice, process_all_invoices
+from config.db_config import PENDING_DIR, PROCESSING_DIR, FAILED_DIR, SUPPORTED_FORMATS
+from services.processor import process_single_invoice
 from services.database import (
     init_db, get_all_invoices, get_invoice_by_id,
-    search_invoices, get_all_logs, get_stats,
+    search_invoices, get_all_logs, get_stats, get_job_by_hash, create_or_update_job
 )
-from services.file_handler import ensure_dirs
+from models.invoice_model import DocumentJob
+from services.file_handler import ensure_dirs, calculate_file_hash, move_to_failed
 from services.logger import log_info, log_error
 
 app = FastAPI(title="InvoiceFlow", version="1.0.0")
@@ -38,6 +39,19 @@ def startup():
     try:
         init_db()
         log_info("App started. DB ready.")
+        # Startup Sync: Repair broken states
+        # Any file left in processing/ was interrupted. Move to failed.
+        for f in Path(PROCESSING_DIR).iterdir():
+            if f.is_file():
+                log_info(f"Startup Sync: Found interrupted file {f.name}. Moving to failed.")
+                file_hash = calculate_file_hash(str(f))
+                create_or_update_job(DocumentJob(
+                    file_hash=file_hash,
+                    file_name=f.name,
+                    status="FAILED",
+                    error_message="Server crashed during processing"
+                ))
+                move_to_failed(str(f))
     except Exception as e:
         log_error(f"DB init failed (check credentials): {e}")
 
@@ -53,42 +67,61 @@ def dashboard():
 # ── Invoice Upload ───────────────────────────────────────────────────────────
 
 @app.post("/upload")
-def upload_invoice(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+def upload_invoice(file: UploadFile = File(...)):
     """Upload and immediately process a single invoice."""
     try:
         ext = Path(file.filename).suffix.lower()
         if ext not in SUPPORTED_FORMATS:
             raise HTTPException(400, f"Unsupported format '{ext}'. Allowed: {SUPPORTED_FORMATS}")
 
-        dest = os.path.join(INVOICES_DIR, file.filename)
+        dest = os.path.join(PENDING_DIR, file.filename)
         with open(dest, "wb") as f_out:
             shutil.copyfileobj(file.file, f_out)
+
+        # Pre-register PENDING state
+        file_hash = calculate_file_hash(dest)
+        job = get_job_by_hash(file_hash)
+        if job and job.get("status") == "PROCESSED":
+            return {"file": file.filename, "status": "DUPLICATE", "detail": "File has already been processed successfully"}
+            
+        create_or_update_job(DocumentJob(file_hash=file_hash, file_name=file.filename, status="PENDING"))
 
         result = process_single_invoice(dest)
         return result
     except Exception as e:
         log_error(f"Global upload crash: {e}")
-        return {"status": "FAILED", "detail": f"Server crash: {str(e)}"}
+        return {"file": getattr(file, "filename", "Unknown"), "status": "FAILED", "detail": f"Server crash: {str(e)}"}
 
+
+def background_process_files(paths: List[str]):
+    for p in paths:
+        process_single_invoice(p)
 
 @app.post("/bulk-upload")
-def bulk_upload(files: List[UploadFile] = File(...)):
+def bulk_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
     """Upload multiple invoices and process them in the background."""
     try:
         saved_paths = []
+        results = []
         for upload in files:
             ext = Path(upload.filename).suffix.lower()
             if ext not in SUPPORTED_FORMATS:
                 continue
-            dest = os.path.join(INVOICES_DIR, upload.filename)
+            dest = os.path.join(PENDING_DIR, upload.filename)
             with open(dest, "wb") as f_out:
                 shutil.copyfileobj(upload.file, f_out)
-            saved_paths.append(dest)
+            
+            file_hash = calculate_file_hash(dest)
+            job = get_job_by_hash(file_hash)
+            if job and job.get("status") == "PROCESSED":
+                results.append({"file": upload.filename, "status": "DUPLICATE", "detail": "Already processed"})
+            else:
+                create_or_update_job(DocumentJob(file_hash=file_hash, file_name=upload.filename, status="PENDING"))
+                saved_paths.append(dest)
+                results.append({"file": upload.filename, "status": "QUEUED", "detail": "Added to processing queue"})
 
-        for p in saved_paths:
-            process_single_invoice(p)
+        background_tasks.add_task(background_process_files, saved_paths)
 
-        results = [{"file": Path(p).name, "status": "SUCCESS", "detail": "Processed"} for p in saved_paths]
         return {"total": len(results), "results": results}
     except Exception as e:
         log_error(f"Global bulk-upload crash: {e}")
@@ -96,18 +129,29 @@ def bulk_upload(files: List[UploadFile] = File(...)):
 
 
 @app.post("/process-folder")
-def process_folder():
-    """Process all invoices already present in the invoices/ folder."""
-    from services.file_handler import scan_invoices
+def process_folder(background_tasks: BackgroundTasks):
+    """Process all invoices already present in the pending/ folder."""
+    from services.file_handler import scan_pending_invoices
     try:
-        pending = scan_invoices()
+        pending = scan_pending_invoices()
         if not pending:
             return {"total": 0, "results": []}
 
+        results = []
+        valid_paths = []
         for p in pending:
-            process_single_invoice(p)
+            file_name = Path(p).name
+            file_hash = calculate_file_hash(p)
+            job = get_job_by_hash(file_hash)
+            if job and job.get("status") == "PROCESSED":
+                results.append({"file": file_name, "status": "DUPLICATE", "detail": "Already processed"})
+            else:
+                create_or_update_job(DocumentJob(file_hash=file_hash, file_name=file_name, status="PENDING"))
+                valid_paths.append(p)
+                results.append({"file": file_name, "status": "QUEUED", "detail": "Added to processing queue"})
 
-        results = [{"file": Path(p).name, "status": "SUCCESS", "detail": "Processed"} for p in pending]
+        background_tasks.add_task(background_process_files, valid_paths)
+
         return {"total": len(results), "results": results}
     except Exception as e:
         log_error(f"Global process-folder crash: {e}")
