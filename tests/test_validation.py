@@ -51,8 +51,8 @@ def test_arithmetic_engine():
     assert invoice.discount_amount == 100.0
     assert invoice.shipping_charges == 50.0
     
-    # Verify Grand Total: Subtotal (900) + Tax (500) - Discount (100) + Shipping (50) = 1350
-    assert invoice.total_amount == 1350.0, f"Expected 1350.0, got {invoice.total_amount}"
+    # Verify Grand Total: Even though math says 1350, we ALWAYS trust the printed total (1351.0)
+    assert invoice.total_amount == 1351.0, f"Expected 1351.0, got {invoice.total_amount}"
     
     # Ensure it generated override logs
     assert any("Override" in log for log in invoice.validation_logs)
@@ -117,15 +117,13 @@ def test_massive_hallucination():
         ]
     }
     
-    # Mathematical total is 1000. Printed total is 344650. Difference is 343650.
-    # Threshold is 10% of 1000 = 100.
-    # Difference (343650) > Threshold (100) -> Should raise ValueError
-    try:
-        parse_invoice(malformed_raw_data, "test.pdf", recovery_pass=True)
-        assert False, "Should have raised ValueError for massive discrepancy"
-    except ValueError as e:
-        assert "Massive Discrepancy Detected" in str(e)
-        print("✓ Massive Hallucination properly rejected")
+    # We now ALWAYS trust the printed total but flag it with low confidence.
+    invoice = parse_invoice(malformed_raw_data, "test.pdf", recovery_pass=True)
+    
+    assert invoice.total_amount == 344650.0, "Should have trusted the printed total"
+    assert any("Massive Discrepancy" in log for log in invoice.validation_logs), "Should have flagged the massive discrepancy"
+    assert invoice.confidence_score <= 0.5, "Confidence score should be heavily penalized"
+    print("✓ Massive Discrepancy properly flagged and accepted")
 
 def test_consensus_algorithm():
     print("\nTesting Multi-Model Consensus Algorithm...")

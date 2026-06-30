@@ -165,14 +165,14 @@ def parse_invoice(raw_data: dict, file_name: str, recovery_pass: bool = False) -
             )
             
         # If we are here, we are on the recovery pass (or printed total was 0)
-        # Apply the threshold block logic
-        threshold = max(calculated_grand_total * 0.10, 5.0)
-        
-        if ocr_grand_total > 0 and difference > threshold:
-            raise ValueError(f"Massive Discrepancy Detected: The printed total ({ocr_grand_total}) mismatches math ({calculated_grand_total}) even after recovery. Extraction blocked.")
-            
-        deduct_confidence(0.25, f"Grand Total Override: Printed {ocr_grand_total} replaced by Math {calculated_grand_total} (Subtotal {final_subtotal} + Tax {tax_amount} + Misc {misc_charges} + RoundOff {round_off} - Discount {discount_amount})")
-        final_total = calculated_grand_total
+        # We DO NOT block extraction anymore. The user wants the invoice saved even if math is wildly off.
+        # We ALWAYS trust the printed total if it exists, because the printed document is the source of truth.
+        if ocr_grand_total > 0:
+            deduct_confidence(0.50, f"Massive Discrepancy: Printed Total {ocr_grand_total} does not match Math {calculated_grand_total}. Trusting Printed Total but flagging for review.")
+            final_total = ocr_grand_total
+        else:
+            deduct_confidence(0.25, f"Grand Total Missing: Falling back to Math Total {calculated_grand_total}")
+            final_total = calculated_grand_total
 
     return Invoice(
         invoice_number=raw_data.get("invoice_number", ""),
