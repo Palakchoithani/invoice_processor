@@ -131,13 +131,13 @@ def extract_from_images(images: list[Image.Image], retries: int = 5) -> Optional
             
             try:
                 raw_response = response.text.strip() if response.text else ""
-            except ValueError:
+            except Exception as text_err:
                 # Fallback if response.text throws an exception due to safety blocks
                 raw_response = ""
-                if response.candidates and response.candidates[0].content.parts:
+                if response.candidates and hasattr(response.candidates[0], "content") and response.candidates[0].content.parts:
                     raw_response = response.candidates[0].content.parts[0].text.strip()
                 else:
-                    log_warning(f"Gemini response blocked by safety ratings: {response.prompt_feedback}")
+                    log_warning(f"Gemini response blocked. Reason: {text_err}")
                     raise ValueError("Response blocked by safety filters.")
             log_info(f"Gemini Response: {raw_response[:300]}")
             
