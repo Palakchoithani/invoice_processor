@@ -49,21 +49,6 @@ def normalize_invoice_number(inv: str) -> str:
     if not inv: return ""
     return re.sub(r'[^A-Z0-9]', '', str(inv).upper())
 
-def check_duplicate(invoice_number: str) -> bool:
-    """Returns True if invoice_number already exists in DB."""
-    db = get_db()
-    norm = normalize_invoice_number(invoice_number)
-    if not norm: return False
-    
-    # Try normalized first
-    docs = db.collection("invoices").where(filter=firestore.FieldFilter("normalized_invoice_number", "==", norm)).limit(1).get()
-    if len(docs) > 0:
-        return True
-        
-    # Fallback to exact match (for legacy data)
-    docs2 = db.collection("invoices").where(filter=firestore.FieldFilter("invoice_number", "==", invoice_number)).limit(1).get()
-    return len(docs2) > 0
-
 def save_invoice(invoice: Invoice) -> str:
     """Insert invoice into DB, return document id."""
     db = get_db()
@@ -84,6 +69,8 @@ def save_invoice(invoice: Invoice) -> str:
         "round_off": float(invoice.round_off) if invoice.round_off else 0.0,
         "total_amount": float(invoice.total_amount) if invoice.total_amount else 0.0,
         "file_name": invoice.file_name,
+        "file_hash": invoice.file_hash,
+        "ocr_fingerprint": invoice.ocr_fingerprint,
         "line_items": invoice.line_items or [],
         "confidence_score": float(invoice.confidence_score),
         "validation_logs": invoice.validation_logs or [],

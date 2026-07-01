@@ -6,10 +6,14 @@ from services.ocr_service import extract_invoice_data
 from services.parser import parse_invoice
 from services.validator import validate_invoice
 from services.database import (
-    check_duplicate,
     save_invoice,
     get_job_by_hash,
     create_or_update_job
+)
+
+from services.duplicate_detector import (
+    run_duplicate_checks,
+    generate_ocr_fingerprint
 )
 
 from services.file_handler import (
@@ -39,15 +43,13 @@ def process_single_invoice(file_path: str) -> dict:
     file_size = Path(file_path).stat().st_size
     file_hash = calculate_file_hash(file_path)
 
-    # 1. Hash Duplicate Prevention
-    existing_job = get_job_by_hash(file_hash)
-    if existing_job and existing_job.get("status") == "PROCESSED":
-        msg = "Duplicate file upload (hash matched)."
-        log_warning(f"{msg} File: {file_name}")
+    # 1. Level 1: File Hash Duplicate Prevention
+    is_dup, level, reason = run_duplicate_checks(file_hash=file_hash)
+    if is_dup:
         return {
             "file": file_name,
             "status": "DUPLICATE",
-            "detail": msg,
+            "detail": reason,
         }
 
     # 2. Set to PROCESSING - OCR Stage
@@ -134,17 +136,29 @@ def process_single_invoice(file_path: str) -> dict:
     if not valid:
         return fail_job(reason, 75)
 
-    # 6. Invoice Number Duplicate Check (Logical Duplicate)
-    if check_duplicate(invoice.invoice_number):
-        msg = f"Duplicate invoice number: {invoice.invoice_number}"
-        log_warning(msg)
+    # 6. Advanced Duplicate Checks (Levels 2-4)
+    invoice.file_hash = file_hash
+    invoice.ocr_fingerprint = generate_ocr_fingerprint(invoice_text)
+    
+    is_dup, level, reason = run_duplicate_checks(
+        file_hash=None, # Already checked Level 1
+        invoice_number=invoice.invoice_number,
+        vendor_name=invoice.vendor_name,
+        invoice_date=invoice.invoice_date.isoformat() if invoice.invoice_date else None,
+        total_amount=invoice.total_amount,
+        line_items_count=len(invoice.line_items) if invoice.line_items else 0,
+        ocr_fingerprint=invoice.ocr_fingerprint
+    )
+    
+    if is_dup:
+        log_warning(f"Duplicate rejected at {level}: {reason}")
         create_or_update_job(DocumentJob(
             file_hash=file_hash,
             file_name=file_name,
             status="DUPLICATE",
             stage="DUPLICATE",
             progress=100,
-            error_message=msg,
+            error_message=reason,
             invoice_number=invoice.invoice_number,
             vendor_name=invoice.vendor_name,
             invoice_date=invoice.invoice_date.isoformat() if invoice.invoice_date else None,
@@ -154,8 +168,9 @@ def process_single_invoice(file_path: str) -> dict:
         return {
             "file": file_name,
             "status": "DUPLICATE",
-            "detail": msg,
+            "detail": reason,
         }
+
 
     # Transition to SAVING
     create_or_update_job(DocumentJob(

@@ -20,6 +20,8 @@ class Invoice:
     round_off: Optional[float] = None
     total_amount: Optional[float] = None
     file_name: Optional[str] = None
+    file_hash: Optional[str] = None
+    ocr_fingerprint: Optional[str] = None
     line_items: Optional[List[Dict[str, Any]]] = field(default_factory=list)
     confidence_score: float = 1.0
     validation_logs: List[str] = field(default_factory=list)
@@ -43,6 +45,8 @@ class Invoice:
             "round_off": self.round_off,
             "total_amount": self.total_amount,
             "file_name": self.file_name,
+            "file_hash": self.file_hash,
+            "ocr_fingerprint": self.ocr_fingerprint,
             "line_items": self.line_items,
             "confidence_score": self.confidence_score,
             "validation_logs": self.validation_logs,
