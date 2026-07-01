@@ -12,7 +12,7 @@ class OpenRouterProvider(BaseProvider):
             base_url="https://openrouter.ai/api/v1",
             api_key=self.api_key,
         )
-        self.model = "meta-llama/llama-3.3-70b-instruct"
+        self.model = "google/gemini-2.5-flash"
 
     def extract_invoice(self, invoice_text: str) -> dict:
         prompt = EXTRACTION_PROMPT + f"\n\n{invoice_text}"

@@ -1,7 +1,11 @@
 import time
 import logging
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log, retry_if_exception
 from services.logger import log_info, log_error, log_warning
+
+def is_not_rate_limit(exception):
+    name = type(exception).__name__
+    return "RateLimit" not in name and "429" not in str(exception)
 
 # Import Providers
 from services.ai.groq_provider import GroqProvider
@@ -150,6 +154,7 @@ class AIRouter:
     @retry(
         stop=stop_after_attempt(3), 
         wait=wait_exponential(multiplier=1, min=2, max=10), 
+        retry=retry_if_exception(is_not_rate_limit),
         reraise=True,
         before_sleep=before_sleep_log(logging.getLogger("uvicorn.error"), logging.WARNING)
     )
@@ -184,6 +189,7 @@ class AIRouter:
     @retry(
         stop=stop_after_attempt(2), 
         wait=wait_exponential(multiplier=1, min=2, max=5), 
+        retry=retry_if_exception(is_not_rate_limit),
         reraise=True,
         before_sleep=before_sleep_log(logging.getLogger("uvicorn.error"), logging.WARNING)
     )

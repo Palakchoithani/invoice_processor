@@ -14,12 +14,11 @@ async def test_stream_generator():
     
     # Mock request
     request = MagicMock()
-    request.is_disconnected = AsyncMock(return_value=False)
     
-    # Call the stream endpoint
-    response = await stream(request)
+    # Call the stream endpoint (synchronous, no await)
+    response = stream(request)
     
-    # The response is a StreamingResponse, its body_iterator yields chunks
+    # The body_iterator is always an async_generator in Starlette StreamingResponse
     events = []
     async for chunk in response.body_iterator:
         if chunk.startswith("data: "):

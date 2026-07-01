@@ -34,20 +34,15 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+import queue
+
 class FirestoreStreamer:
     def __init__(self):
         self.queues = set()
         self.invoices_watch = None
         self.jobs_watch = None
-        self.loop = None
 
     def start(self):
-        try:
-            self.loop = asyncio.get_running_loop()
-        except RuntimeError:
-            log_error("FirestoreStreamer: No running event loop found during start.")
-            return
-
         db = get_db()
         if not self.invoices_watch:
             log_info("FirestoreStreamer: Attaching real-time listener on 'invoices' collection...")
@@ -57,9 +52,6 @@ class FirestoreStreamer:
             self.jobs_watch = db.collection("document_jobs").on_snapshot(self._on_jobs_change)
 
     def _on_invoices_change(self, col_snapshot, changes, read_time):
-        if not self.loop:
-            return
-        
         invoices = []
         for doc in col_snapshot:
             data = doc.to_dict()
@@ -72,9 +64,6 @@ class FirestoreStreamer:
         self.broadcast_stats()
 
     def _on_jobs_change(self, col_snapshot, changes, read_time):
-        if not self.loop:
-            return
-        
         jobs = []
         for doc in col_snapshot:
             jobs.append(doc.to_dict())
@@ -96,11 +85,12 @@ class FirestoreStreamer:
             log_error(f"FirestoreStreamer: Error broadcasting stats: {e}")
 
     def broadcast(self, event_type: str, data: any):
-        if not self.loop:
-            return
         msg = json.dumps({"type": event_type, "data": data})
         for q in list(self.queues):
-            self.loop.call_soon_threadsafe(q.put_nowait, msg)
+            try:
+                q.put_nowait(msg)
+            except Exception:
+                pass
 
 streamer = FirestoreStreamer()
 
@@ -347,8 +337,8 @@ def stats():
         return {"error": str(e), "total_invoices": 0, "grand_total_amount": 0, "processing_summary": {}}
 
 @app.get("/stream")
-async def stream(request: Request):
-    q = asyncio.Queue()
+def stream(request: Request):
+    q = queue.Queue()
     from services.database import get_all_invoices, get_all_jobs, get_stats
     try:
         invoices = get_all_invoices()
@@ -362,17 +352,25 @@ async def stream(request: Request):
         
     streamer.queues.add(q)
     
-    async def event_generator():
+    def event_generator():
         try:
             while True:
-                if await request.is_disconnected():
-                    break
                 try:
-                    msg = await asyncio.wait_for(q.get(), timeout=15.0)
+                    msg = q.get(timeout=15.0)
                     yield f"data: {msg}\n\n"
-                except asyncio.TimeoutError:
+                except queue.Empty:
                     yield ": ping\n\n"
+        except GeneratorExit:
+            log_info("FirestoreStreamer: SSE client disconnected (GeneratorExit)")
+        except Exception as e:
+            log_info(f"FirestoreStreamer: SSE client disconnected: {e}")
         finally:
             streamer.queues.discard(q)
             
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+        "Access-Control-Allow-Origin": "*"
+    }
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers=headers)
