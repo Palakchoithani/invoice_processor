@@ -104,24 +104,29 @@ def bulk_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = Fil
         saved_paths = []
         results = []
         for upload in files:
-            ext = Path(upload.filename).suffix.lower()
-            if ext not in SUPPORTED_FORMATS:
-                continue
-            dest = os.path.join(PENDING_DIR, upload.filename)
-            with open(dest, "wb") as f_out:
-                shutil.copyfileobj(upload.file, f_out)
-            
-            file_hash = calculate_file_hash(dest)
-            job = get_job_by_hash(file_hash)
-            if job and job.get("status") == "PROCESSED":
-                results.append({"file": upload.filename, "status": "DUPLICATE", "detail": "Already processed"})
-            else:
-                create_or_update_job(DocumentJob(file_hash=file_hash, file_name=upload.filename, status="PENDING"))
-                saved_paths.append(dest)
-                results.append({"file": upload.filename, "status": "QUEUED", "detail": "Added to processing queue"})
+            try:
+                ext = Path(upload.filename).suffix.lower()
+                if ext not in SUPPORTED_FORMATS:
+                    continue
+                dest = os.path.join(PENDING_DIR, upload.filename)
+                with open(dest, "wb") as f_out:
+                    shutil.copyfileobj(upload.file, f_out)
+                
+                file_hash = calculate_file_hash(dest)
+                job = get_job_by_hash(file_hash)
+                if job and job.get("status") == "PROCESSED":
+                    if os.path.exists(dest):
+                        os.remove(dest)
+                    results.append({"file": upload.filename, "status": "DUPLICATE", "detail": "Already processed"})
+                else:
+                    create_or_update_job(DocumentJob(file_hash=file_hash, file_name=upload.filename, status="PENDING"))
+                    saved_paths.append(dest)
+                    results.append({"file": upload.filename, "status": "QUEUED", "detail": "Added to processing queue"})
+            except Exception as e:
+                log_error(f"Failed to process file {upload.filename}: {e}")
+                results.append({"file": upload.filename, "status": "FAILED", "detail": str(e)})
 
         background_tasks.add_task(background_process_files, saved_paths)
-
         return {"total": len(results), "results": results}
     except Exception as e:
         log_error(f"Global bulk-upload crash: {e}")
@@ -144,6 +149,8 @@ def process_folder(background_tasks: BackgroundTasks):
             file_hash = calculate_file_hash(p)
             job = get_job_by_hash(file_hash)
             if job and job.get("status") == "PROCESSED":
+                if os.path.exists(p):
+                    os.remove(p)
                 results.append({"file": file_name, "status": "DUPLICATE", "detail": "Already processed"})
             else:
                 create_or_update_job(DocumentJob(file_hash=file_hash, file_name=file_name, status="PENDING"))
@@ -151,7 +158,6 @@ def process_folder(background_tasks: BackgroundTasks):
                 results.append({"file": file_name, "status": "QUEUED", "detail": "Added to processing queue"})
 
         background_tasks.add_task(background_process_files, valid_paths)
-
         return {"total": len(results), "results": results}
     except Exception as e:
         log_error(f"Global process-folder crash: {e}")
@@ -213,10 +219,24 @@ def retry_job(file_hash: str, background_tasks: BackgroundTasks):
 @app.delete("/delete/{file_hash}")
 def delete_job(file_hash: str):
     from services.database import get_db
+    from config.db_config import PENDING_DIR, PROCESSING_DIR, PROCESSED_DIR, FAILED_DIR
     db = get_db()
     job_ref = db.collection("document_jobs").document(file_hash)
-    if not job_ref.get().exists:
+    doc = job_ref.get()
+    if not doc.exists:
         raise HTTPException(404, "Job not found")
+    
+    data = doc.to_dict()
+    file_name = data.get("file_name")
+    
+    if file_name:
+        for d in [PENDING_DIR, PROCESSING_DIR, PROCESSED_DIR, FAILED_DIR]:
+            path = os.path.join(d, file_name)
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception as e:
+                    log_error(f"Failed to delete orphaned file {path}: {e}")
     
     job_ref.delete()
     return {"status": "success", "message": "Job deleted"}

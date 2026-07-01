@@ -17,11 +17,13 @@ class MockProvider(BaseProvider):
         if self.attempts < 3:
             raise Exception(f"Simulated API failure {self.attempts}")
         return {"status": "success"}
+    def recover_invoice(self, invoice_text: str, printed_total: float, calculated_total: float, gap: float) -> dict:
+        return {"tax_amount": gap}
 
 router = AIRouter()
 router.providers = {"mock": MockProvider()}
 router.priority = ["mock"]
 
 print("Starting extraction...")
-result = router.route_extraction("test")
+result = router.extract_with_consensus("test", "test.pdf")
 print("Final Result:", result)
