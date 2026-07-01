@@ -238,6 +238,16 @@ def delete_job(file_hash: str):
                 except Exception as e:
                     log_error(f"Failed to delete orphaned file {path}: {e}")
     
+    # Also delete the associated invoice if it exists
+    invoice_id = data.get("invoice_id")
+    if invoice_id:
+        try:
+            db.collection("invoices").document(invoice_id).delete()
+        except Exception as e:
+            log_error(f"Failed to delete invoice {invoice_id}: {e}")
+            
+    # And delete any related logs (we can query processing_logs by file_name if we wanted, but there's no log ID saved directly in job. Actually let's just delete the job and invoice)
+
     job_ref.delete()
     return {"status": "success", "message": "Job deleted"}
 
