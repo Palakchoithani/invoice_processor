@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
     rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
     :root {
       --bg: #f8fafc;
@@ -1211,7 +1212,7 @@
             <option value="NUMBER">Invoice Number</option>
           </select>
 
-          <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
+          <button class="btn btn-outline" onclick="exportExcel()">Export Excel</button>
         </div>
         <div class="table-wrap">
           <table>
@@ -1274,9 +1275,11 @@
 
   <script>
     // Automatically use local API during development, and Render for production
-    const API_BASE = (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost' || window.location.hostname === '')
+    const API_BASE = (window.location.protocol === 'file:')
       ? 'http://127.0.0.1:8000'
-      : 'https://invoice-processor-oe4j.onrender.com';
+      : (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost' || window.location.hostname === '')
+        ? window.location.origin
+        : 'https://invoice-processor-oe4j.onrender.com';
     let uploadMode = 'single';
     let selectedFiles = [];
     let allInvoices = [];
@@ -1482,6 +1485,32 @@
         // Clear selection
         selectedFiles = [];
         showSelected();
+        
+        // Fallback: Immediately inject the returned status into allJobs in case SSE is blocked or offline
+        if (data.results && Array.isArray(data.results)) {
+            data.results.forEach(result => {
+                let job = allJobs.find(j => j.file_name === result.file);
+                if (!job) {
+                    job = { file_name: result.file };
+                    allJobs.unshift(job);
+                }
+                job.status = result.status;
+                if (result.status === 'SUCCESS') {
+                    job.status = 'PROCESSED';
+                    job.progress = 100;
+                    if (result.firestore_id) job.invoice_id = result.firestore_id;
+                } else if (result.status === 'DUPLICATE') {
+                    job.status = 'DUPLICATE';
+                    job.progress = 100;
+                    job.error_message = result.detail;
+                } else if (result.status === 'FAILED') {
+                    job.status = 'FAILED';
+                    job.progress = 100;
+                    job.error_message = result.detail;
+                }
+            });
+            updateJobsUI(allJobs);
+        }
         
         // Wait 500ms to allow Firestore records to initialize before fetching stats to prevent race condition
         setTimeout(() => {
@@ -1694,9 +1723,25 @@
       }).join('');
     }
 
-    // Keep loadStats for retro-compatibility / trigger points in action handlers
-    function loadStats() {
-      updateJobsUI(allJobs);
+    // Fetch stats and jobs to guarantee dashboard is up to date, even without SSE
+    async function loadStats() {
+      try {
+        const [statsRes, jobsRes] = await Promise.all([
+          fetch(API_BASE + '/stats', { cache: 'no-store' }),
+          fetch(API_BASE + '/jobs', { cache: 'no-store' })
+        ]);
+        if (statsRes.ok) {
+          const statsData = await statsRes.json();
+          updateStatsUI(statsData);
+        }
+        if (jobsRes.ok) {
+          allJobs = await jobsRes.json();
+          updateJobsUI(allJobs);
+        }
+      } catch (e) {
+        console.error("Error loading dashboard stats:", e);
+        updateJobsUI(allJobs);
+      }
     }
     
     async function retryJob(fileHash) {
@@ -1817,11 +1862,7 @@
 
     async function loadInvoices() {
       const q = document.getElementById('searchInput').value.trim();
-      if (!q) {
-        renderAllInvoices();
-        return;
-      }
-      const url = `/invoices?q=${encodeURIComponent(q)}`;
+      const url = q ? `/invoices?q=${encodeURIComponent(q)}` : '/invoices';
       try {
         const res = await fetch(API_BASE + url, { cache: 'no-store' });
         allInvoices = await res.json();
@@ -1991,24 +2032,38 @@
       return html;
     }
 
-    function exportCSV() {
+    function exportExcel() {
       if (!allInvoices.length) {
         notify('Nothing to export', 'Load or search invoice records before exporting.', 'error');
         return;
       }
       const cols = ['id', 'invoice_number', 'vendor_name', 'invoice_date', 'gst_number', 'subtotal', 'tax_amount', 'total_amount', 'file_name', 'created_at'];
-      const header = cols.join(',');
-      const rows = allInvoices.map(r => cols.map(c => JSON.stringify(r[c] ?? '')).join(','));
-      const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'bhelconnect-records.csv';
-      a.click();
-      notify('Export Ready', 'Invoice records were exported as a CSV file.', 'success');
+      
+      const worksheetData = [];
+      worksheetData.push(cols);
+      
+      allInvoices.forEach(r => {
+        const row = cols.map(c => r[c] !== null && r[c] !== undefined ? String(r[c]) : '');
+        worksheetData.push(row);
+      });
+      
+      const ws = XLSX.utils.aoa_to_sheet(worksheetData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Invoices");
+      
+      XLSX.writeFile(wb, "bhelconnect-records.xlsx");
+      notify('Export Ready', 'Invoice records were exported as an Excel file.', 'success');
     }
 
-    function loadLogs() {
-      renderLogs();
+    async function loadLogs() {
+      try {
+        const res = await fetch(API_BASE + '/jobs');
+        allJobs = await res.json();
+        renderLogs();
+      } catch (e) {
+        console.error(e);
+        renderLogs();
+      }
     }
     function renderUploadingPlaceholder(fileName) {
       const id = 'upload-card-' + fileName.replace(/[^a-zA-Z0-9]/g, '');

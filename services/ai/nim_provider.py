@@ -8,6 +8,10 @@ class NimProvider(BaseProvider):
         if not self.api_key:
             raise EnvironmentError("NVIDIA_API_KEY not found")
         
+        # Auto-prepend nvapi- prefix if missing
+        if not self.api_key.startswith("nvapi-"):
+            self.api_key = "nvapi-" + self.api_key
+            
         self.client = OpenAI(
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=self.api_key,
