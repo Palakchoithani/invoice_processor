@@ -1398,6 +1398,8 @@
         : 'PDF, JPEG, JPG, and PNG accepted';
     }
 
+    let currentSessionFiles = new Set();
+
     async function submitUpload() {
       if (!selectedFiles.length) {
         notify('Select a file', 'Choose one or more invoice files before processing.', 'error');
@@ -1407,6 +1409,32 @@
       const button = document.getElementById('processBtn');
       button.disabled = true;
 
+      const queue = document.getElementById('uploadResults');
+      if (currentSessionFiles.size === 0) queue.innerHTML = ''; // clear only if new session
+
+      selectedFiles.forEach(f => {
+        currentSessionFiles.add(f.name);
+        const id = 'upload-card-' + f.name.replace(/[^a-zA-Z0-9]/g, '');
+        if(!document.getElementById(id)) {
+            queue.innerHTML += `
+              <div id="${id}" class="panel" style="padding:16px; display:flex; align-items:center; gap:16px; margin-bottom:12px; border: 1px solid var(--border);">
+                <div style="flex:1">
+                  <div style="font-weight:600; font-size:0.9rem; margin-bottom:8px;">${escapeHTML(f.name)}</div>
+                  <div style="width:100%; display:flex; flex-direction:column; gap:6px;">
+                    <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--muted-strong); font-weight:600;">
+                      <span>Uploading...</span>
+                      <span>0%</span>
+                    </div>
+                    <div style="height:8px; width:100%; background:var(--bg-soft); border-radius:4px; overflow:hidden;">
+                      <div style="height:100%; background:var(--blue-accent); width:0%; transition: width 0.4s ease;"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+        }
+      });
+
       try {
         const fd = new FormData();
         selectedFiles.forEach(f => fd.append('files', f));
@@ -1414,17 +1442,16 @@
         const res = await fetch(API_BASE + '/bulk-upload', { method: 'POST', body: fd });
         const data = await res.json();
         
-        notify('Upload Successful', `${data.total || selectedFiles.length} file(s) queued for background processing.`, 'success');
+        notify('Upload Started', `${data.total || selectedFiles.length} file(s) queued for background processing.`, 'success');
         
         // Clear selection
         selectedFiles = [];
         showSelected();
         
-        // Immediately refresh table
-        loadStats();
-        
-        // Switch to View Records tab automatically
-        showSection('invoices', document.querySelector('.nav-links a:nth-child(3)'));
+        // Wait 500ms to allow Firestore records to initialize before fetching stats to prevent race condition
+        setTimeout(() => {
+          loadStats();
+        }, 500);
       } catch (e) {
         notify('Upload Failed', e.message, 'error');
       } finally {
@@ -1558,6 +1585,24 @@
         } else {
           tbody.innerHTML = jobs.map(j => jobRow(j)).join('');
         }
+
+        // --- Live Upload Queue Synchronization ---
+        const queueContainer = document.getElementById('uploadResults');
+        if (queueContainer && currentSessionFiles.size > 0) {
+            let queueHtml = '';
+            currentSessionFiles.forEach(fileName => {
+                // Find latest job for this file name (jobs array is usually sorted by newest first, find first match)
+                const job = jobs.find(j => j.file_name === fileName);
+                if (job) {
+                    queueHtml += uploadCard(job);
+                } else {
+                    // Still uploading, keep placeholder
+                    queueHtml += renderUploadingPlaceholder(fileName);
+                }
+            });
+            queueContainer.innerHTML = queueHtml;
+        }
+
       } catch (e) {
         document.getElementById('recentBody').innerHTML = '<tr><td colspan="11" class="empty">Unable to load jobs.</td></tr>';
       }
@@ -1838,6 +1883,69 @@
         document.getElementById('logsBody').innerHTML = '<tr><td colspan="4" class="empty">Unable to load extraction logs.</td></tr>';
         notify('Logs unavailable', 'Logs could not be loaded.', 'error');
       }
+    }
+    function renderUploadingPlaceholder(fileName) {
+      const id = 'upload-card-' + fileName.replace(/[^a-zA-Z0-9]/g, '');
+      return `
+        <div id="${id}" class="panel" style="padding:16px; display:flex; align-items:center; gap:16px; margin-bottom:12px; border: 1px solid var(--border);">
+          <div style="flex:1">
+            <div style="font-weight:600; font-size:0.9rem; margin-bottom:8px;">${escapeHTML(fileName)}</div>
+            <div style="width:100%; display:flex; flex-direction:column; gap:6px;">
+              <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--muted-strong); font-weight:600;">
+                <span>Uploading...</span>
+                <span>0%</span>
+              </div>
+              <div style="height:8px; width:100%; background:var(--bg-soft); border-radius:4px; overflow:hidden;">
+                <div style="height:100%; background:var(--blue-accent); width:0%; transition: width 0.4s ease;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function uploadCard(j) {
+      const id = 'upload-card-' + j.file_name.replace(/[^a-zA-Z0-9]/g, '');
+      const progressColor = j.status === 'FAILED' ? 'var(--danger)' : j.status === 'PROCESSED' ? 'var(--success)' : j.status === 'DUPLICATE' ? 'var(--warn)' : 'var(--blue-accent)';
+      
+      let statusIcon = '⏳';
+      let statusText = j.stage || j.status;
+      let badgeCls = 'badge-fail';
+      
+      if (j.status === 'PROCESSED' || j.status === 'SUCCESS') { 
+          statusIcon = '✅'; statusText = 'Processed successfully'; badgeCls = 'badge-success'; 
+      }
+      else if (j.status === 'FAILED') { statusIcon = '❌'; statusText = j.error_message || 'Failed'; badgeCls = 'badge-fail'; }
+      else if (j.status === 'DUPLICATE') { statusIcon = '⚠'; statusText = 'Duplicate Invoice'; badgeCls = 'badge-warn'; }
+      else { badgeCls = 'badge-dup'; }
+
+      let actionBtn = '';
+      if (j.status === 'FAILED') {
+        actionBtn = `<button class="btn btn-outline" style="padding:4px 12px; font-size:0.75rem;" onclick="retryJob('${j.file_hash}')">Retry</button>`;
+      } else if (j.status === 'PROCESSED' && j.invoice_id) {
+        actionBtn = `<button class="btn btn-outline" style="padding:4px 12px; font-size:0.75rem;" onclick="viewInvoice('${j.invoice_id}')">View</button>`;
+      }
+
+      return `
+        <div id="${id}" class="panel" style="padding:16px; display:flex; align-items:center; gap:16px; margin-bottom:12px; border: 1px solid var(--border);">
+          <div style="flex:1">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <div style="font-weight:600; font-size:0.9rem;">${statusIcon} ${escapeHTML(j.file_name)}</div>
+              <div>${actionBtn}</div>
+            </div>
+            
+            <div style="width:100%; display:flex; flex-direction:column; gap:6px;">
+              <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--muted-strong); font-weight:600;">
+                <span style="color:${progressColor}">${escapeHTML(statusText)}</span>
+                <span>${j.progress}%</span>
+              </div>
+              <div style="height:8px; width:100%; background:var(--bg-soft); border-radius:4px; overflow:hidden;">
+                <div style="height:100%; background:${progressColor}; width:${j.progress}%; transition: width 0.4s ease;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
     }
 
     // Init
