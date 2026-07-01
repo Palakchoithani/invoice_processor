@@ -43,8 +43,10 @@ def process_single_invoice(file_path: str) -> dict:
     file_size = Path(file_path).stat().st_size
     file_hash = calculate_file_hash(file_path)
 
+    log_info(f"[Upload Completed] Starting processing pipeline for file: {file_name} (hash={file_hash})")
 
     # 2. Set to PROCESSING - OCR Stage
+    log_info(f"[Firebase Write] Creating document job for {file_name}")
     create_or_update_job(DocumentJob(
         file_hash=file_hash,
         file_name=file_name,
@@ -55,10 +57,8 @@ def process_single_invoice(file_path: str) -> dict:
     ))
     processing_path = move_to_processing(file_path)
 
-    log_info(f"Processing invoice: {file_name}")
-
     def fail_job(msg: str, progress: int = 0):
-        log_error(msg)
+        log_error(f"[Pipeline Failed] File: {file_name}, error: {msg}")
         create_or_update_job(DocumentJob(
             file_hash=file_hash,
             file_name=file_name,
@@ -70,10 +70,14 @@ def process_single_invoice(file_path: str) -> dict:
         move_to_failed(processing_path)
         return {"file": file_name, "status": "FAILED", "detail": msg}
 
-    # 3. Extract invoice data
+    # 3. Extract invoice data (OCR)
+    log_info(f"[OCR Started] Performing OCR data extraction on: {file_name}")
     try:
         raw_data, invoice_text = extract_invoice_data(processing_path)
+        log_info(f"[OCR Completed] Successfully extracted text fingerprint from: {file_name}")
     except Exception as e:
+        import traceback
+        log_error(f"OCR Exception stack trace:\n{traceback.format_exc()}")
         return fail_job(f"Extraction failed: {e}", 20)
 
     # Transition to AI
@@ -85,14 +89,15 @@ def process_single_invoice(file_path: str) -> dict:
         progress=40
     ))
 
-    # 4. Parse invoice & Handle Mismatch Recovery
+    # 4. Parse invoice (AI) & Handle Mismatch Recovery
+    log_info(f"[AI Started] Analyzing extraction schema using Generative AI model for: {file_name}")
     try:
         from services.parser import MismatchException
         from services.ocr_service import ai_router
         try:
             invoice = parse_invoice(raw_data, file_name)
         except MismatchException as mismatch:
-            log_warning(f"Math Mismatch Detected: {mismatch}. Triggering OCR Recovery Pass...")
+            log_warning(f"[Math Mismatch] Math Mismatch Detected: {mismatch}. Triggering OCR Recovery Pass...")
             recovered_data = ai_router.recover_missing_charges(
                 invoice_text=invoice_text,
                 printed_total=mismatch.printed_total,
@@ -110,8 +115,11 @@ def process_single_invoice(file_path: str) -> dict:
             invoice = parse_invoice(raw_data, file_name, recovery_pass=True)
             invoice.confidence_score = round(max(0.0, invoice.confidence_score - 0.20), 2)
             invoice.validation_logs.append("OCR Recovery Pass Successfully Bridged Gap")
+        log_info(f"[AI Completed] AI parse finished for: {file_name}")
 
     except Exception as e:
+        import traceback
+        log_error(f"AI Exception stack trace:\n{traceback.format_exc()}")
         return fail_job(f"Parsing failed: {e}", 50)
 
     # Transition to VALIDATION
@@ -124,16 +132,19 @@ def process_single_invoice(file_path: str) -> dict:
     ))
 
     # 5. Validate invoice
+    log_info(f"[Validation Started] Running math integrity rules validation for: {file_name}")
     valid, reason = validate_invoice(invoice)
     if not valid:
         return fail_job(reason, 75)
+    log_info(f"[Validation Completed] Integrity checks passed for: {file_name}")
 
     # 6. Advanced Duplicate Checks (Levels 2-4)
+    log_info(f"[Duplicate Check] Running metadata and OCR fingerprint duplicate tests for: {file_name}")
     invoice.file_hash = file_hash
     invoice.ocr_fingerprint = generate_ocr_fingerprint(invoice_text)
     
     is_dup, level, reason = run_duplicate_checks(
-        file_hash=None, # Already checked Level 1
+        file_hash=None, # Already checked Level 1 in API controller
         invoice_number=invoice.invoice_number,
         vendor_name=invoice.vendor_name,
         invoice_date=invoice.invoice_date.isoformat() if invoice.invoice_date else None,
@@ -143,7 +154,7 @@ def process_single_invoice(file_path: str) -> dict:
     )
     
     if is_dup:
-        log_warning(f"Duplicate rejected at {level}: {reason}")
+        log_warning(f"[Duplicate Check] Duplicate identified at {level}: {reason}")
         create_or_update_job(DocumentJob(
             file_hash=file_hash,
             file_name=file_name,
@@ -157,12 +168,12 @@ def process_single_invoice(file_path: str) -> dict:
             total_amount=invoice.total_amount
         ))
         move_to_processed(processing_path)
+        log_info(f"[Processing Completed] Duplicate resolved. No database save for: {file_name}")
         return {
             "file": file_name,
             "status": "DUPLICATE",
             "detail": reason,
         }
-
 
     # Transition to SAVING
     create_or_update_job(DocumentJob(
@@ -174,6 +185,7 @@ def process_single_invoice(file_path: str) -> dict:
     ))
 
     # 7. Save invoice
+    log_info(f"[Firebase Write] Saving extracted invoice object: {invoice.invoice_number}")
     try:
         firestore_id = save_invoice(invoice)
         create_or_update_job(DocumentJob(
@@ -190,7 +202,8 @@ def process_single_invoice(file_path: str) -> dict:
             processing_time=invoice.processing_time.isoformat() if invoice.processing_time else datetime.now().isoformat()
         ))
         move_to_processed(processing_path)
-        log_info(f"Invoice saved. Firestore ID={firestore_id}")
+        log_info(f"[Firebase Write] Invoice saved. Firestore ID={firestore_id}")
+        log_info(f"[Processing Completed] Successfully finalized invoice extraction for: {file_name}")
 
         return {
             "file": file_name,
@@ -200,6 +213,8 @@ def process_single_invoice(file_path: str) -> dict:
             "invoice": invoice.to_dict(),
         }
     except Exception as e:
+        import traceback
+        log_error(f"Saving Exception stack trace:\n{traceback.format_exc()}")
         return fail_job(f"Save failed: {e}", 95)
 
 def process_all_invoices() -> list[dict]:

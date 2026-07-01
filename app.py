@@ -1,10 +1,12 @@
 import os
 import shutil
+import json
+import asyncio
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -12,7 +14,7 @@ from config.db_config import PENDING_DIR, PROCESSING_DIR, FAILED_DIR, SUPPORTED_
 from services.processor import process_single_invoice
 from services.database import (
     init_db, get_all_invoices, get_invoice_by_id,
-    search_invoices, get_stats, get_job_by_hash, create_or_update_job
+    search_invoices, get_stats, get_job_by_hash, create_or_update_job, get_db
 )
 from models.invoice_model import DocumentJob
 from services.file_handler import ensure_dirs, calculate_file_hash, move_to_failed
@@ -32,6 +34,76 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+class FirestoreStreamer:
+    def __init__(self):
+        self.queues = set()
+        self.invoices_watch = None
+        self.jobs_watch = None
+        self.loop = None
+
+    def start(self):
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            log_error("FirestoreStreamer: No running event loop found during start.")
+            return
+
+        db = get_db()
+        if not self.invoices_watch:
+            log_info("FirestoreStreamer: Attaching real-time listener on 'invoices' collection...")
+            self.invoices_watch = db.collection("invoices").on_snapshot(self._on_invoices_change)
+        if not self.jobs_watch:
+            log_info("FirestoreStreamer: Attaching real-time listener on 'document_jobs' collection...")
+            self.jobs_watch = db.collection("document_jobs").on_snapshot(self._on_jobs_change)
+
+    def _on_invoices_change(self, col_snapshot, changes, read_time):
+        if not self.loop:
+            return
+        
+        invoices = []
+        for doc in col_snapshot:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            invoices.append(data)
+            
+        invoices.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        log_info(f"FirestoreStreamer: Broadcast invoices update (count={len(invoices)})")
+        self.broadcast("invoices", invoices)
+        self.broadcast_stats()
+
+    def _on_jobs_change(self, col_snapshot, changes, read_time):
+        if not self.loop:
+            return
+        
+        jobs = []
+        for doc in col_snapshot:
+            jobs.append(doc.to_dict())
+            
+        jobs.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+        jobs = jobs[:500]
+        
+        log_info(f"FirestoreStreamer: Broadcast jobs update (count={len(jobs)})")
+        self.broadcast("jobs", jobs)
+        self.broadcast_stats()
+
+    def broadcast_stats(self):
+        from services.database import get_stats
+        try:
+            stats = get_stats()
+            log_info("FirestoreStreamer: Broadcast stats update")
+            self.broadcast("stats", stats)
+        except Exception as e:
+            log_error(f"FirestoreStreamer: Error broadcasting stats: {e}")
+
+    def broadcast(self, event_type: str, data: any):
+        if not self.loop:
+            return
+        msg = json.dumps({"type": event_type, "data": data})
+        for q in list(self.queues):
+            self.loop.call_soon_threadsafe(q.put_nowait, msg)
+
+streamer = FirestoreStreamer()
+
 # ── Startup ──────────────────────────────────────────────────────────────────
 
 @app.on_event("startup")
@@ -40,6 +112,7 @@ def startup():
     try:
         init_db()
         log_info("App started. DB ready.")
+        streamer.start()
         # Startup Sync: Repair broken states
         # Any file left in processing/ was interrupted. Move to failed.
         for f in Path(PROCESSING_DIR).iterdir():
@@ -277,3 +350,34 @@ def stats():
         return get_stats()
     except Exception as e:
         return {"error": str(e), "total_invoices": 0, "grand_total_amount": 0, "processing_summary": {}}
+
+@app.get("/stream")
+async def stream(request: Request):
+    q = asyncio.Queue()
+    from services.database import get_all_invoices, get_all_jobs, get_stats
+    try:
+        invoices = get_all_invoices()
+        jobs = get_all_jobs()
+        stats = get_stats()
+        q.put_nowait(json.dumps({"type": "invoices", "data": invoices}))
+        q.put_nowait(json.dumps({"type": "jobs", "data": jobs}))
+        q.put_nowait(json.dumps({"type": "stats", "data": stats}))
+    except Exception as e:
+        log_error(f"Failed to populate initial stream data: {e}")
+        
+    streamer.queues.add(q)
+    
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"data: {msg}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            streamer.queues.discard(q)
+            
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

@@ -1567,106 +1567,136 @@
       }
     }
 
-    let autoRefreshInterval = null;
+    let allJobs = [];
     let previous_completed_count = -1;
 
-    async function loadStats() {
-      try {
-        const res = await fetch(API_BASE + '/stats', { cache: 'no-store' });
-        const d = await res.json();
-        lastStats = d || {};
-        const ps = d.processing_summary || {};
-        const perf = d.performance || {};
-        const processed = Number(ps.SUCCESS ?? 0);
-        const duplicates = Number(ps.DUPLICATE ?? 0);
-        const failed = Number(ps.FAILED ?? 0);
-        const total = Number(d.total_invoices ?? 0);
-        
-        if(document.getElementById('statTotal')) document.getElementById('statTotal').textContent = total.toLocaleString('en-IN');
-        if(document.getElementById('statProcessed')) document.getElementById('statProcessed').textContent = processed.toLocaleString('en-IN');
-        if(document.getElementById('statDuplicates')) document.getElementById('statDuplicates').textContent = duplicates.toLocaleString('en-IN');
-        if(document.getElementById('statMonthly')) document.getElementById('statMonthly').textContent = fmtCurrency(d.grand_total_amount || 0);
-        
-        if (document.getElementById('statMonthlyHint')) document.getElementById('statMonthlyHint').textContent = 'Total value processed';
-
-        if (document.getElementById('heroTotal')) document.getElementById('heroTotal').textContent = total.toLocaleString('en-IN');
-        if (document.getElementById('heroProcessed')) document.getElementById('heroProcessed').textContent = processed.toLocaleString('en-IN');
-        if (document.getElementById('heroVolume')) document.getElementById('heroVolume').textContent = fmtCurrency(d.grand_total_amount || 0);
-
-        // Tooltip population
-        if(document.getElementById('ttAccuracy')) document.getElementById('ttAccuracy').textContent = (perf.overall_accuracy ?? 0) + '%';
-        if(document.getElementById('ttOcr')) document.getElementById('ttOcr').textContent = (perf.ocr_success_rate ?? 0) + '%';
-        if(document.getElementById('ttAi')) document.getElementById('ttAi').textContent = (perf.ai_success_rate ?? 0) + '%';
-        if(document.getElementById('ttValid')) document.getElementById('ttValid').textContent = (perf.validation_success_rate ?? 0) + '%';
-        if(document.getElementById('ttSuccess')) document.getElementById('ttSuccess').textContent = processed.toLocaleString('en-IN');
-        if(document.getElementById('ttDuplicate')) document.getElementById('ttDuplicate').textContent = duplicates.toLocaleString('en-IN');
-        if(document.getElementById('ttFailed')) document.getElementById('ttFailed').textContent = failed.toLocaleString('en-IN');
-        if(document.getElementById('ttTime')) document.getElementById('ttTime').textContent = (perf.avg_processing_time_sec ?? 0) + 's';
-
-        // Synchronize All Invoices silently in background if a new job completed
-        if (previous_completed_count !== -1 && processed > previous_completed_count) {
-           const searchQ = document.getElementById('searchInput') ? document.getElementById('searchInput').value.trim() : '';
-           if (!searchQ) {
-               loadInvoices(); 
-           }
-        }
-        previous_completed_count = processed;
-
-        renderStatusChart(processed, failed, duplicates);
-      } catch (e) {
-        console.error('Stats unavailable', e);
-      }
-
-      try {
-        const res = await fetch(API_BASE + '/jobs', { cache: 'no-store' });
-        const jobs = await res.json();
-        const tbody = document.getElementById('recentBody');
-        
-        // Feed volume chart with jobs that have dates
-        renderVolumeChart(jobs.filter(j => j.invoice_date || j.created_at) || []);
-        
-        if (tbody) {
-          if (!jobs.length) {
-            tbody.innerHTML = '<tr><td colspan="11" class="empty">No uploaded documents found.</td></tr>';
-          } else {
-            tbody.innerHTML = jobs.map(j => jobRow(j)).join('');
-          }
-        }
-
-        // --- Live Upload Queue Synchronization ---
-        const queueContainer = document.getElementById('uploadResults');
-        if (queueContainer && currentSessionFiles.size > 0) {
-            let queueHtml = '';
-            currentSessionFiles.forEach(fileName => {
-                const job = jobs.find(j => j.file_name === fileName);
-                if (job) {
-                    queueHtml += uploadCard(job);
-                    // Remove from queue if fully processed or duplicate
-                    if (job.status === 'PROCESSED' || job.status === 'SUCCESS' || job.status === 'DUPLICATE') {
-                        currentSessionFiles.delete(fileName);
-                    }
-                } else {
-                    queueHtml += renderUploadingPlaceholder(fileName);
-                }
-            });
-            queueContainer.innerHTML = queueHtml;
-        }
-
-      } catch (e) {
-        console.error("loadStats failed:", e);
-      }
-
-      // Ensure global auto-refresh is running quickly for real-time feel
-      if (!autoRefreshInterval) {
-        autoRefreshInterval = setInterval(() => {
-            loadStats();
+    function initRealtimeSync() {
+      console.log("Initializing real-time sync via Server-Sent Events...");
+      const source = new EventSource(API_BASE + '/stream');
+      
+      source.onmessage = function(event) {
+        try {
+          const payload = JSON.parse(event.data);
+          const type = payload.type;
+          const data = payload.data;
+          
+          if (type === 'stats') {
+            updateStatsUI(data);
+          } else if (type === 'jobs') {
+            allJobs = data || [];
+            updateJobsUI(allJobs);
+          } else if (type === 'invoices') {
+            allInvoices = data || [];
             const searchInput = document.getElementById('searchInput');
-            // Only auto-refresh invoices if user isn't actively searching
-            if (searchInput && searchInput.value.trim() === '') {
-                loadInvoices();
+            if (!searchInput || searchInput.value.trim() === '') {
+              renderAllInvoices();
             }
-        }, 3000);
+          }
+        } catch (e) {
+          console.error("SSE parse error:", e);
+        }
+      };
+      
+      source.onerror = function(err) {
+        console.error("SSE connection lost. Reconnecting in 3s...", err);
+        source.close();
+        setTimeout(initRealtimeSync, 3000);
+      };
+    }
+
+    function updateStatsUI(d) {
+      lastStats = d || {};
+      const ps = d.processing_summary || {};
+      const perf = d.performance || {};
+      const processed = Number(ps.SUCCESS ?? 0);
+      const duplicates = Number(ps.DUPLICATE ?? 0);
+      const failed = Number(ps.FAILED ?? 0);
+      const total = Number(d.total_invoices ?? 0);
+      
+      if(document.getElementById('statTotal')) document.getElementById('statTotal').textContent = total.toLocaleString('en-IN');
+      if(document.getElementById('statProcessed')) document.getElementById('statProcessed').textContent = processed.toLocaleString('en-IN');
+      if(document.getElementById('statDuplicates')) document.getElementById('statDuplicates').textContent = duplicates.toLocaleString('en-IN');
+      if(document.getElementById('statMonthly')) document.getElementById('statMonthly').textContent = fmtCurrency(d.grand_total_amount || 0);
+      
+      if (document.getElementById('statMonthlyHint')) document.getElementById('statMonthlyHint').textContent = 'Total value processed';
+
+      if (document.getElementById('heroTotal')) document.getElementById('heroTotal').textContent = total.toLocaleString('en-IN');
+      if (document.getElementById('heroProcessed')) document.getElementById('heroProcessed').textContent = processed.toLocaleString('en-IN');
+      if (document.getElementById('heroVolume')) document.getElementById('heroVolume').textContent = fmtCurrency(d.grand_total_amount || 0);
+
+      // Tooltip population
+      if(document.getElementById('ttAccuracy')) document.getElementById('ttAccuracy').textContent = (perf.overall_accuracy ?? 0) + '%';
+      if(document.getElementById('ttOcr')) document.getElementById('ttOcr').textContent = (perf.ocr_success_rate ?? 0) + '%';
+      if(document.getElementById('ttAi')) document.getElementById('ttAi').textContent = (perf.ai_success_rate ?? 0) + '%';
+      if(document.getElementById('ttValid')) document.getElementById('ttValid').textContent = (perf.validation_success_rate ?? 0) + '%';
+      if(document.getElementById('ttSuccess')) document.getElementById('ttSuccess').textContent = processed.toLocaleString('en-IN');
+      if(document.getElementById('ttDuplicate')) document.getElementById('ttDuplicate').textContent = duplicates.toLocaleString('en-IN');
+      if(document.getElementById('ttFailed')) document.getElementById('ttFailed').textContent = failed.toLocaleString('en-IN');
+      if(document.getElementById('ttTime')) document.getElementById('ttTime').textContent = (perf.avg_processing_time_sec ?? 0) + 's';
+
+      renderStatusChart(processed, failed, duplicates);
+    }
+
+    function updateJobsUI(jobs) {
+      renderVolumeChart(jobs.filter(j => j.invoice_date || j.created_at) || []);
+      
+      // Update Upload Queue
+      const queueContainer = document.getElementById('uploadResults');
+      if (queueContainer && currentSessionFiles.size > 0) {
+          let queueHtml = '';
+          currentSessionFiles.forEach(fileName => {
+              const job = jobs.find(j => j.file_name === fileName);
+              if (job) {
+                  queueHtml += uploadCard(job);
+                  // Remove from queue if fully processed, duplicate, or failed
+                  if (job.status === 'PROCESSED' || job.status === 'SUCCESS' || job.status === 'DUPLICATE' || job.status === 'FAILED') {
+                      setTimeout(() => {
+                          currentSessionFiles.delete(fileName);
+                          updateJobsUI(allJobs);
+                      }, 3000);
+                  }
+              } else {
+                  queueHtml += renderUploadingPlaceholder(fileName);
+              }
+          });
+          queueContainer.innerHTML = queueHtml;
       }
+      
+      renderLogs();
+    }
+
+    function renderLogs() {
+      const tbody = document.getElementById('logsBody');
+      if (!tbody) return;
+      if (!allJobs || !allJobs.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty">No extraction logs yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = allJobs.map(r => {
+        const cls = r.status === 'SUCCESS' || r.status === 'PROCESSED' ? 'badge-success' : r.status === 'DUPLICATE' ? 'badge-dup' : r.status === 'QUEUED' || r.status === 'PENDING' || r.status === 'PROCESSING' ? 'badge-dup' : 'badge-fail';
+        const displayStatus = r.status === 'PROCESSED' ? 'SUCCESS' : r.status;
+        const note = r.error_message || (r.status === 'SUCCESS' || r.status === 'PROCESSED' ? 'Processed successfully' : 'In progress...');
+        
+        let ts = '—';
+        if (r.updated_at) {
+          try {
+            ts = new Date(r.updated_at).toLocaleString('en-IN');
+          } catch(e) {}
+        }
+
+        return `
+          <tr>
+            <td>${escapeHTML(r.file_name)}</td>
+            <td><span class="badge ${cls}">${escapeHTML(displayStatus)}</span></td>
+            <td style="color:var(--muted); font-size:0.82rem;">${escapeHTML(businessMessage(note))}</td>
+            <td style="color:var(--muted); font-size:0.82rem;">${escapeHTML(ts)}</td>
+          </tr>`;
+      }).join('');
+    }
+
+    // Keep loadStats for retro-compatibility / trigger points in action handlers
+    function loadStats() {
+      updateJobsUI(allJobs);
     }
     
     async function retryJob(fileHash) {
@@ -1787,7 +1817,11 @@
 
     async function loadInvoices() {
       const q = document.getElementById('searchInput').value.trim();
-      const url = q ? `/invoices?q=${encodeURIComponent(q)}` : '/invoices';
+      if (!q) {
+        renderAllInvoices();
+        return;
+      }
+      const url = `/invoices?q=${encodeURIComponent(q)}`;
       try {
         const res = await fetch(API_BASE + url, { cache: 'no-store' });
         allInvoices = await res.json();
@@ -1973,29 +2007,8 @@
       notify('Export Ready', 'Invoice records were exported as a CSV file.', 'success');
     }
 
-    async function loadLogs() {
-      try {
-        const res = await fetch(API_BASE + '/logs');
-        const rows = await res.json();
-        const tbody = document.getElementById('logsBody');
-        if (!rows.length) {
-          tbody.innerHTML = '<tr><td colspan="4" class="empty">No extraction logs yet.</td></tr>';
-          return;
-        }
-        tbody.innerHTML = rows.map(r => {
-          const cls = r.status === 'SUCCESS' ? 'badge-success' : r.status === 'DUPLICATE' ? 'badge-dup' : r.status === 'QUEUED' ? 'badge-dup' : 'badge-fail';
-          return `
-            <tr>
-              <td>${escapeHTML(r.file_name)}</td>
-              <td><span class="badge ${cls}">${escapeHTML(r.status)}</span></td>
-              <td style="color:var(--muted); font-size:0.82rem;">${escapeHTML(businessMessage(r.error_message || '—'))}</td>
-              <td style="color:var(--muted); font-size:0.82rem;">${escapeHTML(r.processed_at || '—')}</td>
-            </tr>`;
-        }).join('');
-      } catch (e) {
-        document.getElementById('logsBody').innerHTML = '<tr><td colspan="4" class="empty">Unable to load extraction logs.</td></tr>';
-        notify('Logs unavailable', 'Logs could not be loaded.', 'error');
-      }
+    function loadLogs() {
+      renderLogs();
     }
     function renderUploadingPlaceholder(fileName) {
       const id = 'upload-card-' + fileName.replace(/[^a-zA-Z0-9]/g, '');
@@ -2064,13 +2077,7 @@
 
     // Init
     applyTheme(localStorage.getItem('bhelconnect-theme') || 'light');
-    loadStats();
-    
-    // Auto-refresh polling every 5 seconds to guarantee dashboard accuracy
-    setInterval(() => {
-        // Only refresh stats silently. loadStats internally handles conditional refresh of loadInvoices()
-        loadStats();
-    }, 5000);
+    initRealtimeSync();
   </script>
 </body>
 
