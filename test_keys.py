@@ -27,7 +27,7 @@ Total: 1210.00
 
 print("Testing AI Router with real API keys...")
 try:
-    result = router.route_extraction(sample_invoice_text)
+    result = router.extract_with_consensus(sample_invoice_text, "test.pdf")
     print("SUCCESS! Extraction Result:")
     print(result)
 except Exception as e:
