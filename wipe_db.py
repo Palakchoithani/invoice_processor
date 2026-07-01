@@ -1,30 +1,22 @@
-import sys
-from pathlib import Path
-from dotenv import load_dotenv
+import firebase_admin
+from firebase_admin import credentials, firestore
+import json
+import os
+from config.db_config import FIREBASE_KEY_PATH
 
-sys.path.append(str(Path(__file__).parent))
-load_dotenv()
+def wipe_db():
+    if not firebase_admin._apps:
+        if os.path.exists(FIREBASE_KEY_PATH):
+            cred = credentials.Certificate(FIREBASE_KEY_PATH)
+            firebase_admin.initialize_app(cred)
+        else:
+            firebase_admin.initialize_app()
+    db = firestore.client()
+    for coll in ["invoices", "processing_logs", "document_jobs"]:
+        docs = db.collection(coll).get()
+        for doc in docs:
+            db.collection(coll).document(doc.id).delete()
+    print("Database wiped!")
 
-from services.database import get_db
-
-db = get_db()
-
-def delete_collection(coll_ref, batch_size):
-    docs = coll_ref.limit(batch_size).stream()
-    deleted = 0
-
-    for doc in docs:
-        print(f"Deleting doc {doc.id} => {doc.to_dict()}")
-        doc.reference.delete()
-        deleted += 1
-
-    if deleted >= batch_size:
-        return delete_collection(coll_ref, batch_size)
-
-print("Wiping 'invoices' collection...")
-delete_collection(db.collection('invoices'), 50)
-
-print("Wiping 'processing_logs' collection...")
-delete_collection(db.collection('processing_logs'), 50)
-
-print("All database data has been deleted.")
+if __name__ == "__main__":
+    wipe_db()

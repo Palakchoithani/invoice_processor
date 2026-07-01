@@ -1474,7 +1474,7 @@
 
     async function loadStats() {
       try {
-        const res = await fetch(API_BASE + '/stats');
+        const res = await fetch(API_BASE + '/stats', { cache: 'no-store' });
         const d = await res.json();
         lastStats = d || {};
         const ps = d.processing_summary || {};
@@ -1511,7 +1511,7 @@
       }
 
       try {
-        const res = await fetch(API_BASE + '/jobs');
+        const res = await fetch(API_BASE + '/jobs', { cache: 'no-store' });
         const jobs = await res.json();
         const tbody = document.getElementById('recentBody');
         
@@ -1675,16 +1675,16 @@
       const q = document.getElementById('searchInput').value.trim();
       const url = q ? `/invoices?q=${encodeURIComponent(q)}` : '/invoices';
       try {
-        const res = await fetch(API_BASE + url);
+        const res = await fetch(API_BASE + url, { cache: 'no-store' });
         allInvoices = await res.json();
         const tbody = document.getElementById('invoiceBody');
         if (!allInvoices.length) {
-          tbody.innerHTML = '<tr><td colspan="9" class="empty">No invoices found. Try a different search query.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="11" class="empty">No invoices found. Try a different search query.</td></tr>';
           return;
         }
         tbody.innerHTML = allInvoices.map(r => invoiceRow(r, true)).join('');
       } catch (e) {
-        document.getElementById('invoiceBody').innerHTML = '<tr><td colspan="9" class="empty">Unable to load invoices.</td></tr>';
+        document.getElementById('invoiceBody').innerHTML = '<tr><td colspan="11" class="empty">Unable to load invoices.</td></tr>';
         notify('Invoices unavailable', 'Invoice records could not be loaded.', 'error');
       }
     }
@@ -1848,15 +1848,16 @@
       const id = 'upload-card-' + j.file_name.replace(/[^a-zA-Z0-9]/g, '');
       const progressColor = j.status === 'FAILED' ? 'var(--danger)' : j.status === 'PROCESSED' ? 'var(--success)' : j.status === 'DUPLICATE' ? 'var(--warn)' : 'var(--blue-accent)';
       
-      let statusIcon = '⏳';
-      let statusText = j.stage || j.status;
-      let badgeCls = 'badge-fail';
-      
+      let statusIcon = '<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>';
+      let statusText = 'Pending';
+      let badgeCls = 'badge-pending';
+      let actions = '';
       if (j.status === 'PROCESSED' || j.status === 'SUCCESS') { 
-          statusIcon = '✅'; statusText = 'Processed successfully'; badgeCls = 'badge-success'; 
+          statusIcon = '<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>'; statusText = 'Processed successfully'; badgeCls = 'badge-success'; 
       }
-      else if (j.status === 'FAILED') { statusIcon = '❌'; statusText = j.error_message || 'Failed'; badgeCls = 'badge-fail'; }
-      else if (j.status === 'DUPLICATE') { statusIcon = '⚠'; statusText = 'Duplicate Invoice'; badgeCls = 'badge-warn'; }
+      else if (j.status === 'FAILED') { statusIcon = '<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>'; statusText = j.error_message || 'Failed'; badgeCls = 'badge-fail'; }
+      else if (j.status === 'DUPLICATE') { statusIcon = '<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>'; statusText = 'Duplicate Invoice'; badgeCls = 'badge-warn'; }
+      else if (j.status === 'PROCESSING') { statusIcon = '<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="spinner"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>'; statusText = 'Extracting data...'; badgeCls = 'badge-process'; }
       else { badgeCls = 'badge-dup'; }
 
       let actionBtn = '';
