@@ -1274,7 +1274,7 @@
 
   <script>
     // Automatically use the current host (localhost or vercel)
-    const API_BASE = 'https://invoice-processor-oe4j.onrender.com';
+    const API_BASE = '';
     let uploadMode = 'single';
     let selectedFiles = [];
     let allInvoices = [];
@@ -1651,7 +1651,7 @@
         }
 
       } catch (e) {
-        document.getElementById('recentBody').innerHTML = '<tr><td colspan="11" class="empty">Unable to load jobs.</td></tr>';
+        console.error("loadStats failed:", e);
       }
 
       // Ensure global auto-refresh is running quickly for real-time feel
@@ -1791,8 +1791,9 @@
         allInvoices = await res.json();
         renderAllInvoices();
       } catch (e) {
-        document.getElementById('invoiceBody').innerHTML = '<tr><td colspan="11" class="empty">Unable to load invoices.</td></tr>';
-        notify('Invoices unavailable', 'Invoice records could not be loaded.', 'error');
+        console.error(e);
+        document.getElementById('invoiceBody').innerHTML = '<tr><td colspan="11" class="empty">Unable to load invoices: ' + escapeHTML(e.message) + '</td></tr>';
+        notify('Invoices unavailable', 'Error: ' + escapeHTML(e.message), 'error');
       }
     }
 
