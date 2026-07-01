@@ -1273,8 +1273,10 @@
   </footer>
 
   <script>
-    // Automatically use the current host (localhost or vercel)
-    const API_BASE = '';
+    // Automatically use local API during development, and Render for production
+    const API_BASE = (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')
+      ? 'http://127.0.0.1:8000'
+      : 'https://invoice-processor-oe4j.onrender.com';
     let uploadMode = 'single';
     let selectedFiles = [];
     let allInvoices = [];
