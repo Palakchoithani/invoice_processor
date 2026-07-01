@@ -1186,10 +1186,31 @@
     <!-- ── SECTION: ALL INVOICES ── -->
     <div id="sec-invoices" class="section">
       <div class="panel">
-        <div class="search-bar" style="display:flex; gap:12px; margin-bottom:20px;">
+        <div class="search-bar" style="display:flex; gap:12px; margin-bottom:20px; align-items: center;">
           <input type="text" id="searchInput" placeholder="Search by invoice number, vendor, or date..."
             style="flex:1; padding:10px 14px; border:1px solid var(--border-strong); border-radius:6px; background:var(--bg-soft); color:var(--text); outline:none;"
             oninput="debounceSearch()" />
+          
+          <select id="filterSelect" onchange="renderAllInvoices()" style="padding:10px 14px; border:1px solid var(--border-strong); border-radius:6px; background:var(--bg-soft); color:var(--text); outline:none; font-family:var(--font);">
+            <option value="ALL">All Time</option>
+            <option value="TODAY">Today</option>
+            <option value="LAST_7">Last 7 Days</option>
+            <option value="LAST_30">Last 30 Days</option>
+            <option value="THIS_MONTH">This Month</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="DUPLICATE">Duplicate</option>
+          </select>
+
+          <select id="sortSelect" onchange="renderAllInvoices()" style="padding:10px 14px; border:1px solid var(--border-strong); border-radius:6px; background:var(--bg-soft); color:var(--text); outline:none; font-family:var(--font);">
+            <option value="NEWEST">Newest First</option>
+            <option value="OLDEST">Oldest First</option>
+            <option value="DATE_DESC">Invoice Date</option>
+            <option value="AMOUNT_DESC">Amount (High to Low)</option>
+            <option value="AMOUNT_ASC">Amount (Low to High)</option>
+            <option value="VENDOR">Vendor Name</option>
+            <option value="NUMBER">Invoice Number</option>
+          </select>
+
           <button class="btn btn-outline" onclick="exportCSV()">Export CSV</button>
         </div>
         <div class="table-wrap">
@@ -1274,22 +1295,7 @@
     }
 
     function businessMessage(value) {
-      const vendorName = String.fromCharCode(71, 101, 109, 105, 110, 105);
-      const shortLabel = String.fromCharCode(65, 73);
-      const longLabel = String.fromCharCode(65, 114, 116, 105, 102, 105, 99, 105, 97, 108, 32, 73, 110, 116, 101, 108, 108, 105, 103, 101, 110, 99, 101);
-      
-      // Update Overview Cards
-      // Total Invoices shows the actual number of unique invoices stored in the DB
-      document.getElementById('statTotal').innerText = data.total_invoices || 0;
-      document.getElementById('statAmount').innerText = '$' + (data.grand_total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 });
-      document.getElementById('statErrors').innerText = data.processing_summary.FAILED || 0;
-      document.getElementById('statDuplicates').innerText = data.processing_summary.DUPLICATE || 0;
-
-      return String(value ?? '')
-        .replaceAll(vendorName, 'Document service')
-        .replace(new RegExp(`\\b${shortLabel}\\b`, 'g'), 'automation')
-        .replace(new RegExp(longLabel, 'gi'), 'automation')
-        .replace(/Smart automation/gi, 'Workflow automation');
+      return String(value ?? '').replace(/Smart automation/gi, 'Workflow automation');
     }
 
     function fmtCurrency(value) {
@@ -1630,12 +1636,14 @@
         if (queueContainer && currentSessionFiles.size > 0) {
             let queueHtml = '';
             currentSessionFiles.forEach(fileName => {
-                // Find latest job for this file name (jobs array is usually sorted by newest first, find first match)
                 const job = jobs.find(j => j.file_name === fileName);
                 if (job) {
                     queueHtml += uploadCard(job);
+                    // Remove from queue if fully processed or duplicate
+                    if (job.status === 'PROCESSED' || job.status === 'SUCCESS' || job.status === 'DUPLICATE') {
+                        currentSessionFiles.delete(fileName);
+                    }
                 } else {
-                    // Still uploading, keep placeholder
                     queueHtml += renderUploadingPlaceholder(fileName);
                 }
             });
@@ -1650,7 +1658,12 @@
       if (!autoRefreshInterval) {
         autoRefreshInterval = setInterval(() => {
             loadStats();
-        }, 1000);
+            const searchInput = document.getElementById('searchInput');
+            // Only auto-refresh invoices if user isn't actively searching
+            if (searchInput && searchInput.value.trim() === '') {
+                loadInvoices();
+            }
+        }, 3000);
       }
     }
     
@@ -1776,19 +1789,77 @@
       try {
         const res = await fetch(API_BASE + url, { cache: 'no-store' });
         allInvoices = await res.json();
-        const tbody = document.getElementById('invoiceBody');
-        if (!allInvoices.length) {
-          tbody.innerHTML = '<tr><td colspan="11" class="empty">No invoices found. Try a different search query.</td></tr>';
-          return;
-        }
-        tbody.innerHTML = allInvoices.map(r => invoiceRow(r, true)).join('');
+        renderAllInvoices();
       } catch (e) {
         document.getElementById('invoiceBody').innerHTML = '<tr><td colspan="11" class="empty">Unable to load invoices.</td></tr>';
         notify('Invoices unavailable', 'Invoice records could not be loaded.', 'error');
       }
     }
 
-    function invoiceRow(r, showId) {
+    function renderAllInvoices() {
+      if (!allInvoices || !allInvoices.length) {
+        document.getElementById('invoiceBody').innerHTML = '<tr><td colspan="11" class="empty">No invoices found.</td></tr>';
+        return;
+      }
+      
+      const filterVal = document.getElementById('filterSelect').value;
+      const sortVal = document.getElementById('sortSelect').value;
+      
+      let filtered = [...allInvoices];
+      
+      // Apply Filter
+      const now = new Date();
+      if (filterVal !== 'ALL') {
+        filtered = filtered.filter(r => {
+           if (filterVal === 'TODAY') {
+             return r.created_at && (new Date(r.created_at).toDateString() === now.toDateString());
+           }
+           if (filterVal === 'LAST_7') {
+             return r.created_at && ((now - new Date(r.created_at)) / (1000 * 60 * 60 * 24) <= 7);
+           }
+           if (filterVal === 'LAST_30') {
+             return r.created_at && ((now - new Date(r.created_at)) / (1000 * 60 * 60 * 24) <= 30);
+           }
+           if (filterVal === 'THIS_MONTH') {
+             if (!r.created_at) return false;
+             const d = new Date(r.created_at);
+             return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+           }
+           // COMPLETED & DUPLICATE are handled via jobs, but invoices in DB are SUCCESS
+           if (filterVal === 'COMPLETED') return true; // everything in DB is completed
+           if (filterVal === 'DUPLICATE') return false; // duplicates are not in invoices DB
+           return true;
+        });
+      }
+      
+      // Apply Sort
+      filtered.sort((a, b) => {
+        const da = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const db = b.created_at ? new Date(b.created_at).getTime() : 0;
+        const ida = a.invoice_date ? new Date(a.invoice_date).getTime() : 0;
+        const idb = b.invoice_date ? new Date(b.invoice_date).getTime() : 0;
+        
+        switch(sortVal) {
+          case 'OLDEST': return da - db;
+          case 'DATE_DESC': return idb - ida;
+          case 'AMOUNT_DESC': return (b.total_amount || 0) - (a.total_amount || 0);
+          case 'AMOUNT_ASC': return (a.total_amount || 0) - (b.total_amount || 0);
+          case 'VENDOR': return (a.vendor_name || '').localeCompare(b.vendor_name || '');
+          case 'NUMBER': return String(a.invoice_number || '').localeCompare(String(b.invoice_number || ''));
+          case 'NEWEST': 
+          default: 
+            return db - da;
+        }
+      });
+      
+      if (!filtered.length) {
+        document.getElementById('invoiceBody').innerHTML = '<tr><td colspan="11" class="empty">No invoices match the selected filters.</td></tr>';
+        return;
+      }
+      document.getElementById('invoiceBody').innerHTML = filtered.map((r, index) => invoiceRow(r, index + 1)).join('');
+    }
+
+    function invoiceRow(r, index) {
       const sCharge = r.shipping_charges || 0;
       const pCharge = r.packing_charges || 0;
       const hCharge = r.handling_charges || 0;
@@ -1799,7 +1870,7 @@
 
       let html = `
         <tr>
-          ${showId ? `<td style="color:var(--muted)">${escapeHTML(r.id)}</td>` : ''}
+          <td style="color:var(--muted); font-weight:700;">${index}</td>
           <td style="font-weight:700; color:var(--navy);">${escapeHTML(r.invoice_number || '—')}</td>
           <td>${escapeHTML(r.vendor_name || '—')}</td>
           <td>${escapeHTML(r.invoice_date || '—')}</td>
