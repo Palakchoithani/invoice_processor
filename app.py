@@ -178,20 +178,16 @@ def upload_invoice(file: UploadFile = File(...)):
         return {"file": getattr(file, "filename", "Unknown"), "status": "FAILED", "detail": f"Server crash: {str(e)}"}
 
 
-def background_process_files(paths: List[str]):
-    for p in paths:
-        process_single_invoice(p)
-
 @app.post("/bulk-upload")
-def bulk_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
-    """Upload multiple invoices and process them in the background."""
+def bulk_upload(files: List[UploadFile] = File(...)):
+    """Upload multiple invoices and process them synchronously."""
     try:
-        saved_paths = []
         results = []
         for upload in files:
             try:
                 ext = Path(upload.filename).suffix.lower()
                 if ext not in SUPPORTED_FORMATS:
+                    results.append({"file": upload.filename, "status": "FAILED", "detail": f"Unsupported format '{ext}'"})
                     continue
                 dest = os.path.join(PENDING_DIR, upload.filename)
                 with open(dest, "wb") as f_out:
@@ -213,13 +209,13 @@ def bulk_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = Fil
                     results.append({"file": upload.filename, "status": "DUPLICATE", "detail": reason})
                 else:
                     create_or_update_job(DocumentJob(file_hash=file_hash, file_name=upload.filename, status="PENDING"))
-                    saved_paths.append(dest)
-                    results.append({"file": upload.filename, "status": "QUEUED", "detail": "Added to processing queue"})
+                    # Process synchronously to prevent Vercel Serverless background tasks termination
+                    res = process_single_invoice(dest)
+                    results.append(res)
             except Exception as e:
                 log_error(f"Failed to process file {upload.filename}: {e}")
                 results.append({"file": upload.filename, "status": "FAILED", "detail": str(e)})
 
-        background_tasks.add_task(background_process_files, saved_paths)
         return {"total": len(results), "results": results}
     except Exception as e:
         log_error(f"Global bulk-upload crash: {e}")
@@ -227,8 +223,8 @@ def bulk_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = Fil
 
 
 @app.post("/process-folder")
-def process_folder(background_tasks: BackgroundTasks):
-    """Process all invoices already present in the pending/ folder."""
+def process_folder():
+    """Process all invoices already present in the pending/ folder synchronously."""
     from services.file_handler import scan_pending_invoices
     try:
         pending = scan_pending_invoices()
@@ -236,7 +232,6 @@ def process_folder(background_tasks: BackgroundTasks):
             return {"total": 0, "results": []}
 
         results = []
-        valid_paths = []
         for p in pending:
             file_name = Path(p).name
             file_hash = calculate_file_hash(p)
@@ -247,10 +242,10 @@ def process_folder(background_tasks: BackgroundTasks):
                 results.append({"file": file_name, "status": "DUPLICATE", "detail": "Already processed"})
             else:
                 create_or_update_job(DocumentJob(file_hash=file_hash, file_name=file_name, status="PENDING"))
-                valid_paths.append(p)
-                results.append({"file": file_name, "status": "QUEUED", "detail": "Added to processing queue"})
+                # Process synchronously to prevent Vercel Serverless background tasks termination
+                res = process_single_invoice(p)
+                results.append(res)
 
-        background_tasks.add_task(background_process_files, valid_paths)
         return {"total": len(results), "results": results}
     except Exception as e:
         log_error(f"Global process-folder crash: {e}")
@@ -282,7 +277,7 @@ def get_jobs():
     return get_all_jobs()
 
 @app.post("/retry/{file_hash}")
-def retry_job(file_hash: str, background_tasks: BackgroundTasks):
+def retry_job(file_hash: str):
     from services.database import get_db
     from services.file_handler import move_from_failed_to_pending
     db = get_db()
@@ -304,8 +299,8 @@ def retry_job(file_hash: str, background_tasks: BackgroundTasks):
             stage="PENDING",
             progress=0
         ))
-        background_tasks.add_task(process_single_invoice, new_path)
-        return {"status": "success", "message": "Job queued for retry"}
+        res = process_single_invoice(new_path)
+        return {"status": "success", "message": "Job retried synchronously", "result": res}
     except Exception as e:
         raise HTTPException(500, f"Retry failed: {e}")
 
