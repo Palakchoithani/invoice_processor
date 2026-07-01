@@ -16,6 +16,7 @@ from services.database import (
 )
 from models.invoice_model import DocumentJob
 from services.file_handler import ensure_dirs, calculate_file_hash, move_to_failed
+from services.duplicate_detector import run_duplicate_checks
 from services.logger import log_info, log_error
 
 app = FastAPI(title="InvoiceFlow", version="1.0.0")
@@ -78,11 +79,22 @@ def upload_invoice(file: UploadFile = File(...)):
         with open(dest, "wb") as f_out:
             shutil.copyfileobj(file.file, f_out)
 
-        # Pre-register PENDING state
+        # Synchronous Level 1 Duplicate Check
         file_hash = calculate_file_hash(dest)
-        job = get_job_by_hash(file_hash)
-        if job and job.get("status") == "PROCESSED":
-            return {"file": file.filename, "status": "DUPLICATE", "detail": "File has already been processed successfully"}
+        is_dup, level, reason = run_duplicate_checks(file_hash=file_hash)
+        if is_dup:
+            if os.path.exists(dest):
+                os.remove(dest)
+            # Create a DUPLICATE job instantly so UI syncs correctly
+            create_or_update_job(DocumentJob(
+                file_hash=file_hash, 
+                file_name=file.filename, 
+                status="DUPLICATE", 
+                stage="DUPLICATE", 
+                progress=100, 
+                error_message=reason
+            ))
+            return {"file": file.filename, "status": "DUPLICATE", "detail": reason}
             
         create_or_update_job(DocumentJob(file_hash=file_hash, file_name=file.filename, status="PENDING"))
 
@@ -113,11 +125,19 @@ def bulk_upload(background_tasks: BackgroundTasks, files: List[UploadFile] = Fil
                     shutil.copyfileobj(upload.file, f_out)
                 
                 file_hash = calculate_file_hash(dest)
-                job = get_job_by_hash(file_hash)
-                if job and job.get("status") == "PROCESSED":
+                is_dup, level, reason = run_duplicate_checks(file_hash=file_hash)
+                if is_dup:
                     if os.path.exists(dest):
                         os.remove(dest)
-                    results.append({"file": upload.filename, "status": "DUPLICATE", "detail": "Already processed"})
+                    create_or_update_job(DocumentJob(
+                        file_hash=file_hash, 
+                        file_name=upload.filename, 
+                        status="DUPLICATE", 
+                        stage="DUPLICATE", 
+                        progress=100, 
+                        error_message=reason
+                    ))
+                    results.append({"file": upload.filename, "status": "DUPLICATE", "detail": reason})
                 else:
                     create_or_update_job(DocumentJob(file_hash=file_hash, file_name=upload.filename, status="PENDING"))
                     saved_paths.append(dest)

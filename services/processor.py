@@ -43,14 +43,6 @@ def process_single_invoice(file_path: str) -> dict:
     file_size = Path(file_path).stat().st_size
     file_hash = calculate_file_hash(file_path)
 
-    # 1. Level 1: File Hash Duplicate Prevention
-    is_dup, level, reason = run_duplicate_checks(file_hash=file_hash)
-    if is_dup:
-        return {
-            "file": file_name,
-            "status": "DUPLICATE",
-            "detail": reason,
-        }
 
     # 2. Set to PROCESSING - OCR Stage
     create_or_update_job(DocumentJob(
