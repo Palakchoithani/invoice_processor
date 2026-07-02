@@ -28,28 +28,31 @@ def extract_text_from_pdf(file_path: str, max_pages: int = 5) -> str:
     if not doc:
         raise ValueError("PDF contains no pages")
     
-    num_pages = min(len(doc), max_pages)
-    full_text = ""
-    
-    for i in range(num_pages):
-        page = doc.load_page(i)
-        page_text = page.get_text()
+    try:
+        num_pages = min(len(doc), max_pages)
+        full_text = ""
         
-        # If native text exists, append it
-        if page_text.strip():
-            full_text += page_text + "\n"
-        else:
-            # Fallback: OCR the scanned page
-            pix = page.get_pixmap(dpi=200)
-            img_data = pix.tobytes("png")
-            img = Image.open(io.BytesIO(img_data)).convert("RGB")
-            try:
-                ocr_text = pytesseract.image_to_string(img)
-                full_text += ocr_text + "\n"
-            except Exception as e:
-                log_error(f"Tesseract OCR failed on PDF page {i}: {e}")
-                
-    return full_text.strip()
+        for i in range(num_pages):
+            page = doc.load_page(i)
+            page_text = page.get_text()
+            
+            # If native text exists, append it
+            if page_text.strip():
+                full_text += page_text + "\n"
+            else:
+                # Fallback: OCR the scanned page
+                pix = page.get_pixmap(dpi=200)
+                img_data = pix.tobytes("png")
+                img = Image.open(io.BytesIO(img_data)).convert("RGB")
+                try:
+                    ocr_text = pytesseract.image_to_string(img)
+                    full_text += ocr_text + "\n"
+                except Exception as e:
+                    log_error(f"Tesseract OCR failed on PDF page {i}: {e}")
+                    
+        return full_text.strip()
+    finally:
+        doc.close()
 
 def extract_text_from_image(file_path: str) -> str:
     """Uses Tesseract to extract text from a static image."""

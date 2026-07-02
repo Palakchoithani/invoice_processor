@@ -37,6 +37,12 @@ def scan_pending_invoices() -> List[str]:
 def move_file(file_path: str, target_dir: str) -> str:
     """Move file to target directory and return new path."""
     dest = os.path.join(target_dir, Path(file_path).name)
+    # Remove destination if it already exists to avoid shutil.move errors
+    if os.path.exists(dest):
+        try:
+            os.remove(dest)
+        except Exception as e:
+            log_warning(f"Could not remove existing file at destination {dest}: {e}")
     shutil.move(file_path, dest)
     return dest
 

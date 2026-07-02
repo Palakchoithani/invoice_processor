@@ -1,7 +1,8 @@
 import os
+import queue
 import shutil
 import json
-import asyncio
+import threading
 from pathlib import Path
 from typing import List, Optional
 
@@ -34,13 +35,24 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-import queue
-
 class FirestoreStreamer:
     def __init__(self):
-        self.queues = set()
+        self._lock = threading.Lock()
+        self._queues = set()
         self.invoices_watch = None
         self.jobs_watch = None
+
+    @property
+    def queues(self):
+        return self._queues
+
+    def add_queue(self, q):
+        with self._lock:
+            self._queues.add(q)
+
+    def discard_queue(self, q):
+        with self._lock:
+            self._queues.discard(q)
 
     def start(self):
         db = get_db()
@@ -86,7 +98,9 @@ class FirestoreStreamer:
 
     def broadcast(self, event_type: str, data: any):
         msg = json.dumps({"type": event_type, "data": data})
-        for q in list(self.queues):
+        with self._lock:
+            snapshot = list(self._queues)
+        for q in snapshot:
             try:
                 q.put_nowait(msg)
             except Exception:
@@ -106,7 +120,9 @@ def startup():
         # Startup Sync: Repair broken states
         # Any file left in processing/ was interrupted. Move to failed.
         for f in Path(PROCESSING_DIR).iterdir():
-            if f.is_file():
+            if not f.is_file():
+                continue
+            try:
                 log_info(f"Startup Sync: Found interrupted file {f.name}. Moving to failed.")
                 file_hash = calculate_file_hash(str(f))
                 create_or_update_job(DocumentJob(
@@ -116,6 +132,8 @@ def startup():
                     error_message="Server crashed during processing"
                 ))
                 move_to_failed(str(f))
+            except Exception as repair_err:
+                log_error(f"Startup Sync: Could not repair file {f.name}: {repair_err}")
     except Exception as e:
         log_error(f"DB init failed (check credentials): {e}")
 
@@ -134,11 +152,13 @@ def dashboard():
 def upload_invoice(file: UploadFile = File(...)):
     """Upload and immediately process a single invoice."""
     try:
-        ext = Path(file.filename).suffix.lower()
+        # Sanitize filename to prevent path traversal attacks
+        safe_name = Path(file.filename).name
+        ext = Path(safe_name).suffix.lower()
         if ext not in SUPPORTED_FORMATS:
             raise HTTPException(400, f"Unsupported format '{ext}'. Allowed: {SUPPORTED_FORMATS}")
 
-        dest = os.path.join(PENDING_DIR, file.filename)
+        dest = os.path.join(PENDING_DIR, safe_name)
         with open(dest, "wb") as f_out:
             shutil.copyfileobj(file.file, f_out)
 
@@ -175,11 +195,13 @@ def bulk_upload(files: List[UploadFile] = File(...)):
         results = []
         for upload in files:
             try:
-                ext = Path(upload.filename).suffix.lower()
+                # Sanitize filename
+                safe_name = Path(upload.filename).name
+                ext = Path(safe_name).suffix.lower()
                 if ext not in SUPPORTED_FORMATS:
                     results.append({"file": upload.filename, "status": "FAILED", "detail": f"Unsupported format '{ext}'"})
                     continue
-                dest = os.path.join(PENDING_DIR, upload.filename)
+                dest = os.path.join(PENDING_DIR, safe_name)
                 with open(dest, "wb") as f_out:
                     shutil.copyfileobj(upload.file, f_out)
                 
@@ -350,7 +372,7 @@ def stream(request: Request):
     except Exception as e:
         log_error(f"Failed to populate initial stream data: {e}")
         
-    streamer.queues.add(q)
+    streamer.add_queue(q)
     
     def event_generator():
         try:
@@ -365,7 +387,7 @@ def stream(request: Request):
         except Exception as e:
             log_info(f"FirestoreStreamer: SSE client disconnected: {e}")
         finally:
-            streamer.queues.discard(q)
+            streamer.discard_queue(q)
             
     headers = {
         "Cache-Control": "no-cache",

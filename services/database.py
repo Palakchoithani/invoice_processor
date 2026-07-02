@@ -131,11 +131,17 @@ def search_invoices(query: str) -> List[Dict[str, Any]]:
 def get_all_jobs() -> List[Dict[str, Any]]:
     """Return all jobs for the realtime dashboard table."""
     db = get_db()
-    docs = db.collection("document_jobs").order_by("updated_at", direction=firestore.Query.DESCENDING).limit(500).get()
+    try:
+        docs = db.collection("document_jobs").order_by("updated_at", direction=firestore.Query.DESCENDING).limit(500).get()
+    except Exception:
+        # Fallback: fetch without ordering if index is missing or field absent
+        docs = db.collection("document_jobs").limit(500).get()
     results = []
     for doc in docs:
         d = doc.to_dict()
         results.append(d)
+    # Always sort in-memory to guarantee consistent ordering
+    results.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
     return results
 
 def get_stats() -> Dict[str, Any]:
