@@ -35,6 +35,24 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# ── Safe JSON encoder ────────────────────────────────────────────────────────
+
+class _SafeEncoder(json.JSONEncoder):
+    """Handles datetime/Timestamp objects that Firestore returns in doc.to_dict()."""
+    def default(self, obj):
+        import datetime
+        if isinstance(obj, (datetime.datetime, datetime.date)):
+            return obj.isoformat()
+        try:
+            # Handle google.cloud.firestore Timestamp
+            return obj.isoformat()
+        except AttributeError:
+            return str(obj)
+
+def _safe_dumps(data) -> str:
+    """json.dumps that never raises on Firestore datetime objects."""
+    return json.dumps(data, cls=_SafeEncoder)
+
 class FirestoreStreamer:
     def __init__(self):
         self._lock = threading.Lock()
@@ -64,28 +82,36 @@ class FirestoreStreamer:
             self.jobs_watch = db.collection("document_jobs").on_snapshot(self._on_jobs_change)
 
     def _on_invoices_change(self, col_snapshot, changes, read_time):
-        invoices = []
-        for doc in col_snapshot:
-            data = doc.to_dict()
-            data["id"] = doc.id
-            invoices.append(data)
-            
-        invoices.sort(key=lambda x: x.get("created_at") or "", reverse=True)
-        log_info(f"FirestoreStreamer: Broadcast invoices update (count={len(invoices)})")
-        self.broadcast("invoices", invoices)
-        self.broadcast_stats()
+        try:
+            invoices = []
+            for doc in col_snapshot:
+                data = doc.to_dict()
+                data["id"] = doc.id
+                invoices.append(data)
+                
+            invoices.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+            log_info(f"FirestoreStreamer: Broadcast invoices update (count={len(invoices)})")
+            self.broadcast("invoices", invoices)
+            # Run stats fetch in a separate thread so we don't block this listener
+            threading.Thread(target=self.broadcast_stats, daemon=True).start()
+        except Exception as e:
+            log_error(f"FirestoreStreamer: _on_invoices_change error: {e}")
 
     def _on_jobs_change(self, col_snapshot, changes, read_time):
-        jobs = []
-        for doc in col_snapshot:
-            jobs.append(doc.to_dict())
+        try:
+            jobs = []
+            for doc in col_snapshot:
+                jobs.append(doc.to_dict())
+                
+            jobs.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+            jobs = jobs[:500]
             
-        jobs.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
-        jobs = jobs[:500]
-        
-        log_info(f"FirestoreStreamer: Broadcast jobs update (count={len(jobs)})")
-        self.broadcast("jobs", jobs)
-        self.broadcast_stats()
+            log_info(f"FirestoreStreamer: Broadcast jobs update (count={len(jobs)})")
+            self.broadcast("jobs", jobs)
+            # Run stats fetch in a separate thread so we don't block this listener
+            threading.Thread(target=self.broadcast_stats, daemon=True).start()
+        except Exception as e:
+            log_error(f"FirestoreStreamer: _on_jobs_change error: {e}")
 
     def broadcast_stats(self):
         from services.database import get_stats
@@ -96,8 +122,12 @@ class FirestoreStreamer:
         except Exception as e:
             log_error(f"FirestoreStreamer: Error broadcasting stats: {e}")
 
-    def broadcast(self, event_type: str, data: any):
-        msg = json.dumps({"type": event_type, "data": data})
+    def broadcast(self, event_type: str, data):
+        try:
+            msg = _safe_dumps({"type": event_type, "data": data})
+        except Exception as e:
+            log_error(f"FirestoreStreamer: JSON serialization error for {event_type}: {e}")
+            return
         with self._lock:
             snapshot = list(self._queues)
         for q in snapshot:
