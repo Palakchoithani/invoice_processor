@@ -604,6 +604,11 @@
       background: var(--blue-glow);
     }
 
+    .drop-zone.drag-error {
+      border-color: var(--danger);
+      background: rgba(229, 83, 59, 0.06);
+    }
+
     .drop-zone .icon {
       font-size: 2.2rem;
       color: var(--navy-light);
@@ -1280,6 +1285,11 @@
       : (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost' || window.location.hostname === '')
         ? window.location.origin
         : 'https://invoice-processor-oe4j.onrender.com';
+    const ALLOWED_EXTENSIONS = new Set(['.pdf', '.jpg', '.jpeg', '.png', '.webp']);
+    const ALLOWED_MIME_PREFIXES = ['application/pdf', 'image/'];
+    const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15 MB
+    const MAX_CONCURRENT_UPLOADS = 5;
+
     let uploadMode = 'single';
     let selectedFiles = [];
     let allInvoices = [];
@@ -1328,8 +1338,12 @@
     function applyTheme(theme) {
       const isDark = theme === 'dark';
       document.body.classList.toggle('dark', isDark);
-      document.getElementById('themeIcon').innerHTML = isDark ? '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>' : '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
-      document.getElementById('themeText').textContent = isDark ? 'Light Mode' : 'Dark Mode';
+      if (document.getElementById('themeIcon')) {
+        document.getElementById('themeIcon').innerHTML = isDark ? '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>' : '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
+      }
+      if (document.getElementById('themeText')) {
+        document.getElementById('themeText').textContent = isDark ? 'Light Mode' : 'Dark Mode';
+      }
       localStorage.setItem('bhelconnect-theme', theme);
     }
 
@@ -1412,6 +1426,22 @@
       selectedFiles = [];
     }
 
+    function validateFile(file) {
+      const ext = '.' + file.name.split('.').pop().toLowerCase();
+      if (!ALLOWED_EXTENSIONS.has(ext)) {
+        return `"${file.name}" has unsupported format "${ext}". Allowed: PDF, JPG, JPEG, PNG, WEBP`;
+      }
+      if (file.size === 0) {
+        return `"${file.name}" is empty`;
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        const mb = (file.size / 1024 / 1024).toFixed(1);
+        const maxMb = (MAX_FILE_SIZE / 1024 / 1024).toFixed(0);
+        return `"${file.name}" is ${mb} MB. Maximum allowed is ${maxMb} MB`;
+      }
+      return null;
+    }
+
     function onDrag(e, over) {
       e.preventDefault();
       document.getElementById('dropZone').classList.toggle('drag', over);
@@ -1420,23 +1450,52 @@
     function onDrop(e) {
       e.preventDefault();
       onDrag(e, false);
-      selectedFiles = Array.from(e.dataTransfer.files);
+      const files = Array.from(e.dataTransfer.files);
+      const valid = [];
+      for (const f of files) {
+        const err = validateFile(f);
+        if (err) {
+          notify('File Rejected', err, 'error');
+        } else {
+          valid.push(f);
+        }
+      }
+      selectedFiles = valid;
       showSelected();
     }
 
     function onFileSelect(e) {
-      selectedFiles = Array.from(e.target.files);
+      const files = Array.from(e.target.files);
+      const valid = [];
+      for (const f of files) {
+        const err = validateFile(f);
+        if (err) {
+          notify('File Rejected', err, 'error');
+        } else {
+          valid.push(f);
+        }
+      }
+      selectedFiles = valid;
       showSelected();
     }
 
     function showSelected() {
       const sub = document.getElementById('dropSubtext');
-      sub.textContent = selectedFiles.length
+      const hasFiles = selectedFiles.length > 0;
+      sub.textContent = hasFiles
         ? selectedFiles.map(f => f.name).join(', ')
         : 'PDF, JPEG, JPG, and PNG accepted';
+      // Only show error styling when there are truly no files AND the user attempted selection
+      // Don't override during active upload (currentSessionFiles non-empty)
+      if (!hasFiles && currentSessionFiles.size === 0) {
+        document.getElementById('dropZone').classList.add('drag-error');
+      } else {
+        document.getElementById('dropZone').classList.remove('drag-error');
+      }
     }
 
     let currentSessionFiles = new Set();
+    let _uploadPollTimer = null;
 
     async function submitUpload() {
       if (!selectedFiles.length) {
@@ -1446,81 +1505,109 @@
 
       const button = document.getElementById('processBtn');
       button.disabled = true;
+      button.textContent = 'Processing...';
 
       const queue = document.getElementById('uploadResults');
-      if (currentSessionFiles.size === 0) queue.innerHTML = ''; // clear only if new session
+      if (currentSessionFiles.size === 0) queue.innerHTML = '';
 
       selectedFiles.forEach(f => {
         currentSessionFiles.add(f.name);
         const id = 'upload-card-' + f.name.replace(/[^a-zA-Z0-9]/g, '');
-        if(!document.getElementById(id)) {
-            queue.innerHTML += `
-              <div id="${id}" class="panel" style="padding:16px; display:flex; align-items:center; gap:16px; margin-bottom:12px; border: 1px solid var(--border);">
-                <div style="flex:1">
-                  <div style="font-weight:600; font-size:0.9rem; margin-bottom:8px;">${escapeHTML(f.name)}</div>
-                  <div style="width:100%; display:flex; flex-direction:column; gap:6px;">
-                    <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--muted-strong); font-weight:600;">
-                      <span>Uploading...</span>
-                      <span>0%</span>
-                    </div>
-                    <div style="height:8px; width:100%; background:var(--bg-soft); border-radius:4px; overflow:hidden;">
-                      <div style="height:100%; background:var(--blue-accent); width:0%; transition: width 0.4s ease;"></div>
-                    </div>
+        if (!document.getElementById(id)) {
+          queue.innerHTML += `
+            <div id="${id}" class="panel" style="padding:16px; display:flex; align-items:center; gap:16px; margin-bottom:12px; border: 1px solid var(--border);">
+              <div style="flex:1">
+                <div style="font-weight:600; font-size:0.9rem; margin-bottom:8px;">${escapeHTML(f.name)}</div>
+                <div style="width:100%; display:flex; flex-direction:column; gap:6px;">
+                  <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--muted-strong); font-weight:600;">
+                    <span class="upload-status-label">Waiting...</span>
+                    <span class="upload-progress-text">0%</span>
+                  </div>
+                  <div style="height:8px; width:100%; background:var(--bg-soft); border-radius:4px; overflow:hidden;">
+                    <div class="upload-progress-bar" style="height:100%; background:var(--blue-accent); width:0%; transition: width 0.4s ease;"></div>
                   </div>
                 </div>
               </div>
-            `;
+            </div>
+          `;
         }
       });
 
-      try {
-        const fd = new FormData();
-        selectedFiles.forEach(f => fd.append('files', f));
+      const uploads = [...selectedFiles];
+      selectedFiles = [];
+      showSelected();
 
-        const res = await fetch(API_BASE + '/bulk-upload', { method: 'POST', body: fd });
-        const data = await res.json();
-        
-        notify('Upload Started', `${data.total || selectedFiles.length} file(s) queued for background processing.`, 'success');
-        
-        // Clear selection
-        selectedFiles = [];
-        showSelected();
-        
-        // Fallback: Immediately inject the returned status into allJobs in case SSE is blocked or offline
-        if (data.results && Array.isArray(data.results)) {
-            data.results.forEach(result => {
-                let job = allJobs.find(j => j.file_name === result.file);
-                if (!job) {
-                    job = { file_name: result.file };
-                    allJobs.unshift(job);
-                }
-                job.status = result.status;
-                if (result.status === 'SUCCESS') {
-                    job.status = 'PROCESSED';
-                    job.progress = 100;
-                    if (result.firestore_id) job.invoice_id = result.firestore_id;
-                } else if (result.status === 'DUPLICATE') {
-                    job.status = 'DUPLICATE';
-                    job.progress = 100;
-                    job.error_message = result.detail;
-                } else if (result.status === 'FAILED') {
-                    job.status = 'FAILED';
-                    job.progress = 100;
-                    job.error_message = result.detail;
-                }
-            });
-            updateJobsUI(allJobs);
+      // Start polling immediately for job updates (covers the wait during backend processing)
+      if (_uploadPollTimer) clearInterval(_uploadPollTimer);
+      let pollCount = 0;
+      const maxPolls = 300; // 10 min at 2s interval
+      const uploadFileNames = uploads.map(f => f.name);
+      let pollCompleted = false;
+      _uploadPollTimer = setInterval(async () => {
+        pollCount++;
+        if (pollCompleted && pollCount > 3) {
+          // Give it a few extra pings after completion, then stop
+          clearInterval(_uploadPollTimer);
+          _uploadPollTimer = null;
+          return;
         }
-        
-        // Wait 500ms to allow Firestore records to initialize before fetching stats to prevent race condition
-        setTimeout(() => {
-          loadStats();
-        }, 500);
-      } catch (e) {
-        notify('Upload Failed', e.message, 'error');
-      } finally {
-        button.disabled = false;
+        if (pollCount > maxPolls) {
+          clearInterval(_uploadPollTimer);
+          _uploadPollTimer = null;
+          return;
+        }
+        try {
+          const res = await fetch(API_BASE + '/jobs', { cache: 'no-store' });
+          if (res.ok) {
+            allJobs = await res.json();
+            updateJobsUI(allJobs);
+            const pending = uploadFileNames.filter(name => {
+              const match = allJobs.find(j => j.file_name === name);
+              return !match || (match.status !== 'PROCESSED' && match.status !== 'SUCCESS' && match.status !== 'FAILED' && match.status !== 'DUPLICATE');
+            });
+            if (pending.length === 0) {
+              pollCompleted = true;
+            }
+          }
+        } catch (e) {
+          // Silently retry on next interval
+        }
+      }, 2000);
+
+      let allResults = [];
+
+      // Process in chunks to limit concurrent uploads
+      for (let i = 0; i < uploads.length; i += MAX_CONCURRENT_UPLOADS) {
+        const chunk = uploads.slice(i, i + MAX_CONCURRENT_UPLOADS);
+        const chunkResults = await Promise.all(chunk.map(async (f) => {
+          try {
+            const fd = new FormData();
+            fd.append('files', f);
+            const res = await fetch(API_BASE + '/bulk-upload', { method: 'POST', body: fd });
+            const data = await res.json();
+            return data.results && data.results.length > 0 ? data.results[0] : { file: f.name, status: 'SUCCESS' };
+          } catch (e) {
+            return { file: f.name, status: 'FAILED', detail: e.message || 'Network error' };
+          }
+        }));
+        allResults.push(...chunkResults);
       }
+
+      const successCount = allResults.filter(r => r.status === 'SUCCESS').length;
+      const dupCount = allResults.filter(r => r.status === 'DUPLICATE').length;
+      const failCount = allResults.filter(r => r.status === 'FAILED').length;
+
+      if (failCount > 0) {
+        notify('Upload Complete', `${successCount} succeeded, ${dupCount} duplicates, ${failCount} failed`, 'error');
+      } else if (dupCount > 0) {
+        notify('Upload Complete', `${successCount} processed, ${dupCount} duplicates found`, 'success');
+      } else {
+        notify('Upload Complete', `${successCount} file(s) processed successfully`, 'success');
+      }
+
+      setTimeout(() => { loadStats(); }, 500);
+      button.disabled = false;
+      button.textContent = 'Process Now';
     }
 
     async function processFolder() {
@@ -1692,6 +1779,19 @@
       }
       
       renderLogs();
+    }
+
+    function viewInvoice(invoiceId) {
+      showSection('invoices', document.querySelector('nav a[onclick*="invoices"]'));
+      // Highlight the invoice in the table after data loads
+      setTimeout(() => {
+        const row = document.querySelector(`#invoiceBody tr[data-invoice-id="${invoiceId}"]`);
+        if (row) {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          row.style.background = 'var(--blue-glow)';
+          setTimeout(() => { row.style.background = ''; }, 3000);
+        }
+      }, 500);
     }
 
     function renderLogs() {
@@ -1947,7 +2047,7 @@
       const miscSum = sCharge + pCharge + hCharge + iCharge + oCharge + roundOff;
 
       let html = `
-        <tr>
+        <tr${r.id ? ` data-invoice-id="${escapeHTML(r.id)}"` : ''}>
           <td style="color:var(--muted); font-weight:700;">${index}</td>
           <td style="font-weight:700; color:var(--navy);">${escapeHTML(r.invoice_number || '—')}</td>
           <td>${escapeHTML(r.vendor_name || '—')}</td>
@@ -2073,11 +2173,11 @@
             <div style="font-weight:600; font-size:0.9rem; margin-bottom:8px;">${escapeHTML(fileName)}</div>
             <div style="width:100%; display:flex; flex-direction:column; gap:6px;">
               <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--muted-strong); font-weight:600;">
-                <span>Uploading...</span>
-                <span>0%</span>
+                <span class="upload-status-label">Uploading...</span>
+                <span class="upload-progress-text">0%</span>
               </div>
               <div style="height:8px; width:100%; background:var(--bg-soft); border-radius:4px; overflow:hidden;">
-                <div style="height:100%; background:var(--blue-accent); width:0%; transition: width 0.4s ease;"></div>
+                <div class="upload-progress-bar" style="height:100%; background:var(--blue-accent); width:0%; transition: width 0.4s ease;"></div>
               </div>
             </div>
           </div>
